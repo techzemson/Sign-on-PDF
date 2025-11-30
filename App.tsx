@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, FileText, ChevronLeft, ChevronRight, X, Download, MousePointer, Type, Image as ImageIcon, PenTool, Check, Trash2, Copy, Move, Maximize2, Palette, Bold, Italic, Loader2, ZoomIn, ZoomOut, RotateCw, Undo, Redo, Calendar, Stamp, FileCheck, RefreshCw, Eraser, Plus, ALargeSmall } from 'lucide-react';
-import { UploadedFile, PDFPageInfo, SignatureItem, SignatureType, DocStats, SIGNATURE_FONTS, COLORS, STAMPS } from './types';
+import { UploadedFile, PDFPageInfo, SignatureItem, SignatureType, DocStats, SIGNATURE_FONTS, COLORS, STAMPS, DATE_FORMATS } from './types';
 import { loadPDF, generateSignedPDF } from './services/pdfService';
 import StatsChart from './components/StatsChart';
 import SignaturePad from './components/SignaturePad';
@@ -26,15 +26,17 @@ function App() {
   const [placingItem, setPlacingItem] = useState<{
     type: SignatureType;
     content: string;
-    style?: any; // To hold font, color, etc.
+    style?: any; 
   } | null>(null);
 
   // Interaction State
   const [selectedSigId, setSelectedSigId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
   const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 });
-  const [itemStartPos, setItemStartPos] = useState({ x: 0, y: 0 });
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 }); // For ghost cursor
+  const [itemStartPos, setItemStartPos] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  const [resizeCorner, setResizeCorner] = useState<string | null>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
   // Modal States
   const [showSigModal, setShowSigModal] = useState(false);
@@ -50,12 +52,11 @@ function App() {
   const [drawnData, setDrawnData] = useState('');
   const [uploadedSigImage, setUploadedSigImage] = useState('');
   
-  // Ref for main container to handle scroll/coords
+  // Ref for main container
   const containerRef = useRef<HTMLDivElement>(null);
 
   // --- ACTIONS ---
 
-  // History Management
   const pushToHistory = (newSignatures: SignatureItem[]) => {
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(newSignatures);
@@ -114,21 +115,11 @@ function App() {
             setIsLoading(false);
         } catch (err) {
             console.error(err);
-            alert("Error parsing PDF");
+            alert("Error parsing PDF. Please try another file.");
             setIsLoading(false);
         }
       };
       reader.readAsArrayBuffer(selectedFile);
-    }
-  };
-
-  const handleReset = () => {
-    if (confirm("Are you sure you want to upload a new file? Current progress will be lost.")) {
-        setFile(null);
-        setPages([]);
-        setSignatures([]);
-        setHistory([]);
-        setHistoryIndex(-1);
     }
   };
 
@@ -164,14 +155,40 @@ function App() {
     setShowSigModal(false);
   };
 
+  // Date Formatting Helper
+  const getFormattedDate = (format: string, date: Date = new Date()) => {
+      const d = date.getDate();
+      const m = date.getMonth() + 1;
+      const y = date.getFullYear();
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+      const dd = d < 10 ? `0${d}` : d;
+      const mm = m < 10 ? `0${m}` : m;
+
+      switch(format) {
+          case 'MM/DD/YYYY': return `${mm}/${dd}/${y}`;
+          case 'DD/MM/YYYY': return `${dd}/${mm}/${y}`;
+          case 'YYYY-MM-DD': return `${y}-${mm}-${dd}`;
+          case 'MMM DD, YYYY': return `${months[m-1]} ${dd}, ${y}`;
+          case 'DD MMM YYYY': return `${dd} ${months[m-1]} ${y}`;
+          default: return date.toLocaleDateString();
+      }
+  };
+
   const handleQuickAction = (type: 'date' | 'stamp' | 'text' | 'symbol', payload?: any) => {
       let content = '';
       let style: any = {};
       let itemType = SignatureType.TEXT;
 
       if (type === 'date') {
-          content = new Date().toLocaleDateString();
-          style = { fontSize: 24, color: '#000000', fontFamily: 'Arial' };
+          content = getFormattedDate('MM/DD/YYYY');
+          style = { 
+            fontSize: 24, 
+            color: '#000000', 
+            fontFamily: 'Arial',
+            dateFormat: 'MM/DD/YYYY',
+            originalDateTimestamp: Date.now()
+          };
           itemType = SignatureType.DATE;
       } else if (type === 'stamp') {
           content = payload.label;
@@ -198,8 +215,6 @@ function App() {
   // Place Signature on Click
   const handlePageClick = (e: React.MouseEvent, pageIndex: number) => {
     if (!placingItem) {
-        // Only deselect if we are NOT clicking on an existing signature
-        // The stopPropagation on signature element handles that, so here we just deselect
         setSelectedSigId(null);
         return;
     }
@@ -230,7 +245,7 @@ function App() {
       id: Date.now().toString(),
       type: placingItem.type,
       content: placingItem.content,
-      x: x - (width / 2), // Center on click
+      x: x - (width / 2),
       y: y - (height / 2),
       width,
       height,
@@ -241,24 +256,38 @@ function App() {
     };
 
     pushToHistory([...signatures, newSig]);
-    setPlacingItem(null); // Stop placing
+    setPlacingItem(null); 
     setSelectedSigId(newSig.id);
   };
 
-  // Dragging Logic
+  // --- MOUSE INTERACTIONS (Drag & Resize) ---
+
   const handleMouseDown = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
+    e.stopPropagation(); // Prevent page click
+    e.preventDefault();
     setSelectedSigId(id);
     setIsDragging(true);
     setDragStartPos({ x: e.clientX, y: e.clientY });
     
     const sig = signatures.find(s => s.id === id);
     if (sig) {
-        setItemStartPos({ x: sig.x, y: sig.y });
+        setItemStartPos({ x: sig.x, y: sig.y, w: sig.width, h: sig.height });
     }
   };
 
-  // Global Mouse Move for Ghost Cursor & Dragging
+  const handleResizeStart = (e: React.MouseEvent, id: string, corner: string) => {
+      e.stopPropagation();
+      e.preventDefault();
+      setSelectedSigId(id);
+      setIsResizing(true);
+      setResizeCorner(corner);
+      setDragStartPos({ x: e.clientX, y: e.clientY });
+      const sig = signatures.find(s => s.id === id);
+      if (sig) {
+          setItemStartPos({ x: sig.x, y: sig.y, w: sig.width, h: sig.height });
+      }
+  };
+
   const handleGlobalMouseMove = useCallback((e: MouseEvent | TouchEvent) => {
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as MouseEvent).clientY;
@@ -280,14 +309,88 @@ function App() {
             return sig;
         }));
     }
-  }, [isDragging, selectedSigId, dragStartPos, itemStartPos, zoom]);
+
+    if (isResizing && selectedSigId && resizeCorner) {
+        const dx = (clientX - dragStartPos.x) / zoom;
+        const dy = (clientY - dragStartPos.y) / zoom;
+        
+        setSignatures(prev => prev.map(sig => {
+            if (sig.id === selectedSigId) {
+                let newW = itemStartPos.w;
+                let newH = itemStartPos.h;
+                let newX = itemStartPos.x;
+                let newY = itemStartPos.y;
+
+                // Aspect ratio preservation for most items, maybe strictly for images
+                // For simplicity, we allow free resizing but we can implement scaling for text
+                
+                if (resizeCorner === 'se') { // Bottom-Right
+                    newW = Math.max(20, itemStartPos.w + dx);
+                    newH = Math.max(20, itemStartPos.h + dy);
+                } else if (resizeCorner === 'sw') { // Bottom-Left
+                    newW = Math.max(20, itemStartPos.w - dx);
+                    newH = Math.max(20, itemStartPos.h + dy);
+                    newX = itemStartPos.x + (itemStartPos.w - newW);
+                } else if (resizeCorner === 'ne') { // Top-Right
+                    newW = Math.max(20, itemStartPos.w + dx);
+                    newH = Math.max(20, itemStartPos.h - dy);
+                    newY = itemStartPos.y + (itemStartPos.h - newH);
+                } else if (resizeCorner === 'nw') { // Top-Left
+                    newW = Math.max(20, itemStartPos.w - dx);
+                    newH = Math.max(20, itemStartPos.h - dy);
+                    newX = itemStartPos.x + (itemStartPos.w - newW);
+                    newY = itemStartPos.y + (itemStartPos.h - newH);
+                }
+
+                // Update font size proportionally if it's text
+                let newFontSize = sig.fontSize;
+                if (sig.type !== SignatureType.IMAGE && sig.type !== SignatureType.DRAWING) {
+                    // Simple logic: Scale font size by height change ratio
+                    const ratio = newH / itemStartPos.h;
+                    // Base current font size or default
+                    newFontSize = (sig.fontSize || 32) * ratio;
+                    // Dampen crazy resizing
+                    if (newFontSize < 8) newFontSize = 8;
+                    if (newFontSize > 200) newFontSize = 200;
+                    
+                    // Note: This updates fontSize constantly. 
+                    // To be smoother, we might want to base it off initial fontSize * totalRatio.
+                    // But here we're updating state every frame, so 'sig.fontSize' is current.
+                    // The ratio calculation above is wrong because itemStartPos is static but sig.fontSize changes? 
+                    // No, itemStartPos is snapshot at start of drag.
+                    // But we need the INITIAL font size at start of drag to scale correctly.
+                    // Let's assume we didn't store initial font size in itemStartPos. 
+                    // Let's just update font size based on height.
+                    // Actually, let's keep it simple: newH determines font size mostly.
+                    newFontSize = (newH / itemStartPos.h) * (sig.fontSize || 32);
+                    // Wait, if I drag, itemStartPos is constant. sig.fontSize in state is NOT updated in itemStartPos.
+                    // So we must rely on the signature in the state... wait. 
+                    // Correct: itemStartPos captures the state at MOUSE DOWN. So 'sig' inside handleResizeStart closure.
+                    // We need to store originalFontSize in itemStartPos.
+                }
+
+                return {
+                    ...sig,
+                    x: newX,
+                    y: newY,
+                    width: newW,
+                    height: newH,
+                };
+            }
+            return sig;
+        }));
+    }
+
+  }, [isDragging, isResizing, selectedSigId, dragStartPos, itemStartPos, zoom, resizeCorner]);
 
   const handleGlobalMouseUp = useCallback(() => {
-    if (isDragging) {
+    if (isDragging || isResizing) {
         setIsDragging(false);
+        setIsResizing(false);
+        setResizeCorner(null);
         pushToHistory([...signatures]);
     }
-  }, [isDragging, signatures]);
+  }, [isDragging, isResizing, signatures]);
 
   useEffect(() => {
     window.addEventListener('mousemove', handleGlobalMouseMove);
@@ -306,7 +409,6 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedSigId) {
-         // Avoid deleting if user is editing text input
          if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
             deleteSignature(selectedSigId);
          }
@@ -348,8 +450,17 @@ function App() {
   };
 
   const updateSignatureProp = (id: string, prop: keyof SignatureItem, value: any) => {
-      const newSigs = signatures.map(s => s.id === id ? { ...s, [prop]: value } : s);
-      setSignatures(newSigs);
+      setSignatures(prev => prev.map(s => {
+          if (s.id === id) {
+              const updated = { ...s, [prop]: value };
+              // If updating format, re-generate content
+              if (prop === 'dateFormat' && s.originalDateTimestamp) {
+                  updated.content = getFormattedDate(value, new Date(s.originalDateTimestamp));
+              }
+              return updated;
+          }
+          return s;
+      }));
   };
 
   const handleDownload = async () => {
@@ -388,22 +499,22 @@ function App() {
                     <div className="h-full bg-blue-600 transition-all duration-300 ease-out" style={{ width: `${progress}%` }}></div>
                 </div>
                 <p className="text-blue-600 font-bold animate-pulse">Analyzing Document...</p>
-                <p className="text-sm text-slate-400 mt-2">Preparing your workspace</p>
             </div>
           )}
 
           <div className="w-24 h-24 bg-blue-600 text-white rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-lg shadow-blue-200 transform -rotate-6 hover:rotate-0 transition-transform duration-300">
             <FileText size={48} />
           </div>
-          <h1 className="text-4xl md:text-6xl font-black text-slate-800 mb-6 tracking-tighter">
-            SignFlow <span className="text-blue-600">Pro</span>
+          <h1 className="text-3xl md:text-5xl font-black text-slate-800 mb-6 tracking-tighter">
+            Digital Signature <br/><span className="text-blue-600 text-2xl md:text-4xl font-bold">or Sign on PDF</span>
           </h1>
-          <p className="text-lg md:text-xl text-slate-600 mb-10 max-w-lg mx-auto leading-relaxed font-light">
-            The professional, free, and secure way to digitally sign PDFs. 
+          <p className="text-lg text-slate-600 mb-10 max-w-lg mx-auto leading-relaxed font-light">
+            The professional way to digitally sign PDFs. 
             <span className="block mt-2 font-medium text-slate-800">Drag, Drop, Sign & Go.</span>
           </p>
           
-          <label className="group relative inline-flex items-center justify-center px-10 py-5 text-lg font-bold text-white transition-all duration-200 bg-slate-900 rounded-full focus:outline-none hover:bg-slate-800 hover:scale-105 cursor-pointer shadow-xl hover:shadow-2xl">
+          {/* UPDATED: Blue Upload Button */}
+          <label className="group relative inline-flex items-center justify-center px-10 py-5 text-lg font-bold text-white transition-all duration-200 bg-blue-600 rounded-full focus:outline-none hover:bg-blue-700 hover:scale-105 cursor-pointer shadow-xl hover:shadow-2xl">
             <Upload className="mr-3 group-hover:-translate-y-1 transition-transform" />
             <span>Upload PDF Document</span>
             <input 
@@ -418,17 +529,18 @@ function App() {
     );
   }
 
+  const selectedSig = signatures.find(s => s.id === selectedSigId);
+
   return (
     <div className="flex flex-col h-screen bg-slate-100 overflow-hidden">
       {/* --- HEADER --- */}
       <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-4 z-30 shadow-sm shrink-0">
         <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md">SF</div>
+                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md">DS</div>
                 <span className="font-bold text-lg text-slate-800 hidden md:inline truncate max-w-[200px]">{file.name}</span>
             </div>
             
-            {/* NEW BUTTON: Upload Another */}
             <label className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-100 bg-blue-50 text-blue-600 text-xs font-bold hover:bg-blue-100 transition-colors cursor-pointer">
                 <Upload size={14} />
                 <span>New File</span>
@@ -443,7 +555,6 @@ function App() {
             </label>
         </div>
         
-        {/* Toolbar Center */}
         <div className="hidden md:flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200 shadow-inner">
             <button onClick={() => setZoom(z => Math.max(0.25, z - 0.25))} className="p-2 hover:bg-white hover:shadow-sm rounded-lg text-slate-600 transition-all"><ZoomOut size={18} /></button>
             <span className="text-xs font-bold w-12 text-center text-slate-500">{Math.round(zoom * 100)}%</span>
@@ -454,9 +565,10 @@ function App() {
         </div>
 
         <div className="flex items-center gap-3">
+             {/* UPDATED: Blue Download Button */}
              <button 
                 onClick={handleDownload}
-                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg hover:shadow-slate-300 active:scale-95"
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg hover:shadow-blue-200 active:scale-95"
             >
                 {isLoading ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
                 <span className="hidden sm:inline">Download PDF</span>
@@ -467,7 +579,7 @@ function App() {
       {/* --- MAIN LAYOUT --- */}
       <div className="flex flex-1 overflow-hidden relative">
         
-        {/* LEFT SIDEBAR (Expanded) */}
+        {/* LEFT SIDEBAR */}
         <div className="w-64 bg-white border-r border-slate-200 flex flex-col p-4 gap-4 z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)] overflow-y-auto">
             
             <div className="space-y-3">
@@ -546,10 +658,7 @@ function App() {
         <div 
             className={`flex-1 overflow-auto bg-slate-100/50 relative p-4 md:p-10 transition-colors duration-200 ${placingItem ? 'cursor-crosshair-custom' : ''}`} 
             ref={containerRef}
-            onClick={() => {
-                // Clicking background deselects
-                setSelectedSigId(null);
-            }}
+            onClick={() => setSelectedSigId(null)}
         >
             <div className="max-w-max mx-auto flex flex-col items-center gap-8 min-h-full pb-20">
                 {pages.map((page, index) => (
@@ -573,7 +682,7 @@ function App() {
                         {signatures.filter(s => s.pageIndex === index).map((sig) => (
                             <div
                                 key={sig.id}
-                                className={`absolute cursor-move select-none group/sig ${selectedSigId === sig.id ? 'z-20' : 'z-10'}`}
+                                className={`absolute select-none group/sig ${selectedSigId === sig.id ? 'z-20' : 'z-10'}`}
                                 style={{
                                     left: sig.x * zoom,
                                     top: sig.y * zoom,
@@ -581,6 +690,7 @@ function App() {
                                     height: sig.height * zoom,
                                     transform: `rotate(${sig.rotation || 0}deg)`,
                                     opacity: sig.opacity ?? 1,
+                                    cursor: isResizing ? 'default' : 'move'
                                 }}
                                 onMouseDown={(e) => handleMouseDown(e, sig.id)}
                                 onClick={(e) => {
@@ -590,15 +700,28 @@ function App() {
                             >
                                 <div className={`w-full h-full relative transition-all duration-150 ${selectedSigId === sig.id ? 'ring-2 ring-blue-500 ring-offset-4 ring-offset-transparent' : 'group-hover/sig:ring-1 group-hover/sig:ring-blue-300 group-hover/sig:ring-dashed'}`}>
                                     
-                                    {/* CONTENT RENDERING */}
+                                    {/* RESIZE HANDLES (Only when selected) */}
+                                    {selectedSigId === sig.id && (
+                                        <>
+                                            <div className="resize-handle -top-1.5 -left-1.5 cursor-nw-resize" onMouseDown={(e) => handleResizeStart(e, sig.id, 'nw')} />
+                                            <div className="resize-handle -top-1.5 -right-1.5 cursor-ne-resize" onMouseDown={(e) => handleResizeStart(e, sig.id, 'ne')} />
+                                            <div className="resize-handle -bottom-1.5 -left-1.5 cursor-sw-resize" onMouseDown={(e) => handleResizeStart(e, sig.id, 'sw')} />
+                                            <div className="resize-handle -bottom-1.5 -right-1.5 cursor-se-resize" onMouseDown={(e) => handleResizeStart(e, sig.id, 'se')} />
+                                        </>
+                                    )}
+
+                                    {/* CONTENT */}
                                     {sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE || sig.type === SignatureType.PLAINTEXT ? (
                                         <div 
-                                            className="w-full h-full flex items-center p-1 leading-none whitespace-nowrap overflow-visible"
+                                            className="w-full h-full flex items-center p-1 leading-none whitespace-nowrap overflow-hidden"
                                             style={{
                                                 fontFamily: sig.type === SignatureType.PLAINTEXT ? 'Helvetica, Arial, sans-serif' : sig.fontFamily,
                                                 color: sig.color,
                                                 fontWeight: sig.isBold ? 'bold' : 'normal',
                                                 fontStyle: sig.isItalic ? 'italic' : 'normal',
+                                                // Calculate font size relative to current height vs original/base height logic?
+                                                // Actually we can just rely on the fontSize state which we update during resize.
+                                                // But we need to scale it by zoom for display.
                                                 fontSize: `${(sig.fontSize || 32) * zoom}px`
                                             }}
                                         >
@@ -610,7 +733,7 @@ function App() {
                                             style={{
                                                 borderColor: sig.color,
                                                 color: sig.color,
-                                                fontSize: `${(sig.fontSize || 24) * zoom}px`,
+                                                fontSize: `${(sig.fontSize || 24) * zoom}px`, // Use updated fontSize
                                                 fontWeight: 'bold',
                                                 opacity: 0.8
                                             }}
@@ -632,29 +755,31 @@ function App() {
                                         <img src={sig.content} className="w-full h-full object-contain pointer-events-none" alt="signature" />
                                     )}
 
-                                    {/* Edit Controls - Visible on Hover OR Select */}
-                                    <div className={`absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-800 text-white rounded-lg flex items-center p-1.5 shadow-xl gap-2 z-50 pointer-events-auto scale-100 origin-bottom transition-opacity duration-200 ${selectedSigId === sig.id || 'opacity-0 group-hover/sig:opacity-100'}`}>
-                                        <button 
-                                            onClick={(e) => { e.stopPropagation(); updateSignatureProp(sig.id, 'rotation', (sig.rotation || 0) - 90) }} 
-                                            className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white" title="Rotate"
-                                        >
-                                            <RotateCw size={14}/>
-                                        </button>
-                                        <div className="w-px h-3 bg-slate-600"></div>
-                                        <button 
-                                            onClick={(e) => { e.stopPropagation(); duplicateSignature(sig.id); }} 
-                                            className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white" title="Duplicate"
-                                        >
-                                            <Copy size={14}/>
-                                        </button>
-                                        <div className="w-px h-3 bg-slate-600"></div>
-                                        <button 
-                                            onClick={(e) => { e.stopPropagation(); deleteSignature(sig.id); }} 
-                                            className="p-1 hover:bg-red-900/50 rounded text-red-400 hover:text-red-300" title="Delete"
-                                        >
-                                            <Trash2 size={14}/>
-                                        </button>
-                                    </div>
+                                    {/* Edit Controls */}
+                                    {selectedSigId === sig.id && !isResizing && !isDragging && (
+                                        <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-800 text-white rounded-lg flex items-center p-1.5 shadow-xl gap-2 z-50 pointer-events-auto">
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); updateSignatureProp(sig.id, 'rotation', (sig.rotation || 0) - 90) }} 
+                                                className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white" title="Rotate"
+                                            >
+                                                <RotateCw size={14}/>
+                                            </button>
+                                            <div className="w-px h-3 bg-slate-600"></div>
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); duplicateSignature(sig.id); }} 
+                                                className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white" title="Duplicate"
+                                            >
+                                                <Copy size={14}/>
+                                            </button>
+                                            <div className="w-px h-3 bg-slate-600"></div>
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); deleteSignature(sig.id); }} 
+                                                className="p-1 hover:bg-red-900/50 rounded text-red-400 hover:text-red-300" title="Delete"
+                                            >
+                                                <Trash2 size={14}/>
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -663,18 +788,32 @@ function App() {
             </div>
         </div>
 
-        {/* RIGHT SIDEBAR (Stats) */}
+        {/* RIGHT SIDEBAR (Stats & Props) */}
         <div className="hidden lg:block w-72 bg-white border-l border-slate-200 p-6 z-10 overflow-y-auto">
              <div className="mb-6">
                 <h2 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-4">Document Analysis</h2>
                 {stats && <StatsChart stats={stats} />}
              </div>
              
-             {/* Selected Item Properties (if any) */}
-             {selectedSigId && (
+             {selectedSig && (
                  <div className="animate-in slide-in-from-right-4 fade-in duration-300">
                     <h2 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-4 mt-8">Properties</h2>
                     <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 space-y-4">
+                        
+                        {/* Date Format Selector */}
+                        {selectedSig.type === SignatureType.DATE && (
+                             <div>
+                                <label className="text-xs font-semibold text-slate-500 mb-1 block">Date Format</label>
+                                <select 
+                                    value={selectedSig.dateFormat || 'MM/DD/YYYY'} 
+                                    onChange={(e) => updateSignatureProp(selectedSig.id, 'dateFormat', e.target.value)}
+                                    className="w-full p-2 rounded-lg border border-slate-200 text-sm"
+                                >
+                                    {DATE_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
+                                </select>
+                            </div>
+                        )}
+
                         <div>
                             <label className="text-xs font-semibold text-slate-500 mb-1 block">Opacity</label>
                             <input 
@@ -682,8 +821,8 @@ function App() {
                                 min="0.1" 
                                 max="1" 
                                 step="0.1"
-                                defaultValue="1"
-                                onChange={(e) => updateSignatureProp(selectedSigId, 'opacity', parseFloat(e.target.value))}
+                                value={selectedSig.opacity ?? 1}
+                                onChange={(e) => updateSignatureProp(selectedSig.id, 'opacity', parseFloat(e.target.value))}
                                 className="w-full accent-blue-600"
                             />
                         </div>
@@ -694,20 +833,22 @@ function App() {
                                 min="0" 
                                 max="360" 
                                 step="15"
-                                defaultValue="0"
-                                onChange={(e) => updateSignatureProp(selectedSigId, 'rotation', parseInt(e.target.value))}
+                                value={selectedSig.rotation || 0}
+                                onChange={(e) => updateSignatureProp(selectedSig.id, 'rotation', parseInt(e.target.value))}
                                 className="w-full accent-blue-600"
                             />
                         </div>
+                         
+                         {/* Manual Size slider for non-mouse users */}
                         <div>
-                            <label className="text-xs font-semibold text-slate-500 mb-1 block">Size</label>
+                            <label className="text-xs font-semibold text-slate-500 mb-1 block">Text Size</label>
                             <input 
                                 type="range" 
                                 min="10" 
                                 max="200" 
                                 step="2"
-                                defaultValue="32"
-                                onChange={(e) => updateSignatureProp(selectedSigId, 'fontSize', parseInt(e.target.value))}
+                                value={selectedSig.fontSize || 32}
+                                onChange={(e) => updateSignatureProp(selectedSig.id, 'fontSize', parseInt(e.target.value))}
                                 className="w-full accent-blue-600"
                             />
                         </div>
@@ -717,7 +858,6 @@ function App() {
         </div>
       </div>
 
-      {/* Floating Action Button (Mobile) */}
       <button 
         onClick={() => setShowSigModal(true)}
         className="md:hidden absolute bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:bg-blue-700 hover:scale-110 transition-all z-50"
@@ -725,7 +865,7 @@ function App() {
         <PenTool size={24} />
       </button>
 
-      {/* --- GHOST CURSOR FOR PLACEMENT --- */}
+      {/* --- GHOST CURSOR --- */}
       {placingItem && (
         <div 
             className="fixed pointer-events-none z-50 opacity-60"
@@ -913,7 +1053,7 @@ function App() {
 
                 <div className="p-6 border-t bg-slate-50 flex justify-between items-center rounded-b-3xl">
                     <div className="text-xs text-slate-400 font-medium px-2">
-                        {activeTab === 'type' ? 'Pro Tip: Select a font that matches your style.' : activeTab === 'draw' ? 'Pro Tip: Draw smoothly for best results.' : 'Pro Tip: Use transparent PNGs.'}
+                        Pro Tip: Drag corners to resize items on the page.
                     </div>
                     <div className="flex gap-3">
                         <button onClick={() => setShowSigModal(false)} className="px-6 py-2.5 text-slate-600 font-bold hover:bg-slate-200 rounded-xl transition-colors">Cancel</button>

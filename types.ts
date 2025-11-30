@@ -33,6 +33,10 @@ export interface SignatureItem {
   isItalic?: boolean;
   fontSize?: number;
   opacity?: number;
+  
+  // Date specific
+  dateFormat?: string;
+  originalDateTimestamp?: number; // To reformat without parsing text
 }
 
 export interface PDFPageInfo {
@@ -94,4 +98,12 @@ export const STAMPS = [
   { label: 'URGENT', color: '#dc2626', borderColor: '#dc2626' },
   { label: 'PAID', color: '#16a34a', borderColor: '#16a34a' },
   { label: 'COPY', color: '#475569', borderColor: '#475569' },
+];
+
+export const DATE_FORMATS = [
+  'MM/DD/YYYY',
+  'DD/MM/YYYY',
+  'YYYY-MM-DD',
+  'MMM DD, YYYY',
+  'DD MMM YYYY',
 ];

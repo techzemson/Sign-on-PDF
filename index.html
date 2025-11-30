@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SignFlow Pro - Advanced PDF Signer</title>
+    <title>Digital Signature or Sign on PDF</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- PDF.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -34,6 +34,22 @@
       }
       .cursor-crosshair-custom {
         cursor: crosshair;
+      }
+      /* Resize Handles */
+      .resize-handle {
+        position: absolute;
+        width: 12px;
+        height: 12px;
+        background-color: #2563eb;
+        border: 2px solid white;
+        border-radius: 50%;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        z-index: 50;
+        transition: transform 0.1s;
+      }
+      .resize-handle:hover {
+        transform: scale(1.2);
+        background-color: #1d4ed8;
       }
     </style>
   <script type="importmap">
