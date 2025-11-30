@@ -64,8 +64,7 @@ export const generateSignedPDF = async (
 
     const x = sig.x * scaleX;
     // PDF coordinate system starts from bottom-left
-    // For rotated items, we might need adjustments, but pdf-lib handles rotation at center usually if specified
-    // Here we treat x,y as top-left of the element on screen
+    // For rotated items, we might need adjustments
     const y = pdfPageHeight - (sig.y * scaleY) - (sig.height * scaleY);
     
     const rotationAngle = degrees(sig.rotation || 0);
@@ -80,9 +79,11 @@ export const generateSignedPDF = async (
         rotate: rotationAngle,
         opacity: sig.opacity ?? 1,
       });
-    } else if (sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE || sig.type === SignatureType.STAMP) {
+    } else {
+      // Handle all text types (Signature, Date, Stamp, PlainText, Symbol)
       const textCanvas = document.createElement('canvas');
       const scaleFactor = 3; 
+      // Add padding for rotation/strokes
       textCanvas.width = sig.width * scaleFactor;
       textCanvas.height = sig.height * scaleFactor;
       const ctx = textCanvas.getContext('2d');
@@ -99,11 +100,22 @@ export const generateSignedPDF = async (
            ctx.textAlign = 'center';
            ctx.textBaseline = 'middle';
            ctx.fillText(sig.content, sig.width / 2, sig.height / 2);
+        } else if (sig.type === SignatureType.PLAINTEXT) {
+            ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${sig.fontSize || 16}px Helvetica, Arial, sans-serif`;
+            ctx.fillStyle = sig.color || '#000000';
+            ctx.textBaseline = 'top';
+            ctx.fillText(sig.content, 0, 0, sig.width);
+        } else if (sig.type === SignatureType.SYMBOL) {
+            ctx.font = `bold ${sig.fontSize || 32}px sans-serif`;
+            ctx.fillStyle = sig.color || '#000000';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(sig.content, sig.width / 2, sig.height / 2);
         } else {
+            // Signature / Date
             ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${sig.fontSize || 32}px "${sig.fontFamily || 'sans-serif'}"`;
             ctx.fillStyle = sig.color || '#000000';
             ctx.textBaseline = 'top';
-            // Handle multi-line if needed, but for signature usually single line
             ctx.fillText(sig.content, 0, 0, sig.width);
         }
       }

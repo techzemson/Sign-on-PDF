@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, FileText, ChevronLeft, ChevronRight, X, Download, MousePointer, Type, Image as ImageIcon, PenTool, Check, Trash2, Copy, Move, Maximize2, Palette, Bold, Italic, Loader2, ZoomIn, ZoomOut, RotateCw, Undo, Redo, Calendar, Stamp, FileCheck, RefreshCw, Eraser } from 'lucide-react';
+import { Upload, FileText, ChevronLeft, ChevronRight, X, Download, MousePointer, Type, Image as ImageIcon, PenTool, Check, Trash2, Copy, Move, Maximize2, Palette, Bold, Italic, Loader2, ZoomIn, ZoomOut, RotateCw, Undo, Redo, Calendar, Stamp, FileCheck, RefreshCw, Eraser, Plus, ALargeSmall } from 'lucide-react';
 import { UploadedFile, PDFPageInfo, SignatureItem, SignatureType, DocStats, SIGNATURE_FONTS, COLORS, STAMPS } from './types';
 import { loadPDF, generateSignedPDF } from './services/pdfService';
 import StatsChart from './components/StatsChart';
@@ -44,6 +44,7 @@ function App() {
   const [typedName, setTypedName] = useState('');
   const [selectedFont, setSelectedFont] = useState(SIGNATURE_FONTS[0]);
   const [selectedColor, setSelectedColor] = useState(COLORS[1]); // Default Blue
+  const [customColor, setCustomColor] = useState('#000000');
   const [isBold, setIsBold] = useState(false);
   const [isItalic, setIsItalic] = useState(false);
   const [drawnData, setDrawnData] = useState('');
@@ -121,6 +122,16 @@ function App() {
     }
   };
 
+  const handleReset = () => {
+    if (confirm("Are you sure you want to upload a new file? Current progress will be lost.")) {
+        setFile(null);
+        setPages([]);
+        setSignatures([]);
+        setHistory([]);
+        setHistoryIndex(-1);
+    }
+  };
+
   // Prepare Signature for Placement
   const handleCreateSignature = () => {
     let content = '';
@@ -147,20 +158,21 @@ function App() {
             color: selectedColor,
             isBold,
             isItalic,
-            fontSize: 32
+            fontSize: 48 // Default size
         }
     });
     setShowSigModal(false);
   };
 
-  const handleQuickAction = (type: 'date' | 'stamp', payload?: any) => {
+  const handleQuickAction = (type: 'date' | 'stamp' | 'text' | 'symbol', payload?: any) => {
       let content = '';
-      let style = {};
+      let style: any = {};
+      let itemType = SignatureType.TEXT;
 
       if (type === 'date') {
           content = new Date().toLocaleDateString();
           style = { fontSize: 24, color: '#000000', fontFamily: 'Arial' };
-          setPlacingItem({ type: SignatureType.DATE, content, style });
+          itemType = SignatureType.DATE;
       } else if (type === 'stamp') {
           content = payload.label;
           style = { 
@@ -169,14 +181,25 @@ function App() {
               isBold: true,
               borderColor: payload.borderColor 
             };
-          setPlacingItem({ type: SignatureType.STAMP, content, style });
+          itemType = SignatureType.STAMP;
+      } else if (type === 'text') {
+          content = "Type here";
+          style = { fontSize: 16, color: '#000000', fontFamily: 'Helvetica' };
+          itemType = SignatureType.PLAINTEXT;
+      } else if (type === 'symbol') {
+          content = payload.symbol;
+          style = { fontSize: 32, color: payload.color || '#000000', isBold: true };
+          itemType = SignatureType.SYMBOL;
       }
+
+      setPlacingItem({ type: itemType, content, style });
   };
 
   // Place Signature on Click
   const handlePageClick = (e: React.MouseEvent, pageIndex: number) => {
     if (!placingItem) {
-        // Deselect if clicking on empty space
+        // Only deselect if we are NOT clicking on an existing signature
+        // The stopPropagation on signature element handles that, so here we just deselect
         setSelectedSigId(null);
         return;
     }
@@ -185,12 +208,19 @@ function App() {
     const x = (e.clientX - rect.left) / zoom;
     const y = (e.clientY - rect.top) / zoom;
 
-    // Default dimensions
+    // Default dimensions based on type
     let width = 200;
     let height = 60;
+    
     if (placingItem.type === SignatureType.STAMP) {
         width = 150; 
         height = 60;
+    } else if (placingItem.type === SignatureType.SYMBOL) {
+        width = 40;
+        height = 40;
+    } else if (placingItem.type === SignatureType.PLAINTEXT) {
+        width = 150;
+        height = 30;
     } else if (placingItem.type === SignatureType.DRAWING || placingItem.type === SignatureType.IMAGE) {
         width = 150;
         height = 80;
@@ -255,10 +285,9 @@ function App() {
   const handleGlobalMouseUp = useCallback(() => {
     if (isDragging) {
         setIsDragging(false);
-        // Commit drag to history
         pushToHistory([...signatures]);
     }
-  }, [isDragging, signatures]); // Warning: this might create history spam if not careful, but okay for basic
+  }, [isDragging, signatures]);
 
   useEffect(() => {
     window.addEventListener('mousemove', handleGlobalMouseMove);
@@ -276,8 +305,11 @@ function App() {
   // Key Listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedSigId) deleteSignature(selectedSigId);
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedSigId) {
+         // Avoid deleting if user is editing text input
+         if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+            deleteSignature(selectedSigId);
+         }
       }
       if (e.key === 'Escape') {
           setPlacingItem(null);
@@ -318,8 +350,6 @@ function App() {
   const updateSignatureProp = (id: string, prop: keyof SignatureItem, value: any) => {
       const newSigs = signatures.map(s => s.id === id ? { ...s, [prop]: value } : s);
       setSignatures(newSigs);
-      // We don't push to history on every slider change, usually onMouseUp of slider
-      // For simplicity here, we might not push history for minor tweaks unless we implement debounce
   };
 
   const handleDownload = async () => {
@@ -383,12 +413,6 @@ function App() {
               onChange={handleFileUpload}
             />
           </label>
-          
-          <div className="mt-12 flex items-center justify-center gap-6 text-sm text-slate-400 font-medium">
-            <span className="flex items-center gap-1"><Check size={14} className="text-green-500"/> Free Forever</span>
-            <span className="flex items-center gap-1"><Check size={14} className="text-green-500"/> No Sign-up</span>
-            <span className="flex items-center gap-1"><Check size={14} className="text-green-500"/> Private & Secure</span>
-          </div>
         </div>
       </div>
     );
@@ -398,14 +422,25 @@ function App() {
     <div className="flex flex-col h-screen bg-slate-100 overflow-hidden">
       {/* --- HEADER --- */}
       <header className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-4 z-30 shadow-sm shrink-0">
-        <div className="flex items-center gap-3">
-             <button onClick={() => setFile(null)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500">
-                <ChevronLeft size={20} />
-             </button>
+        <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">SF</div>
-                <span className="font-bold text-lg text-slate-800 hidden md:inline">{file.name}</span>
+                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md">SF</div>
+                <span className="font-bold text-lg text-slate-800 hidden md:inline truncate max-w-[200px]">{file.name}</span>
             </div>
+            
+            {/* NEW BUTTON: Upload Another */}
+            <label className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-100 bg-blue-50 text-blue-600 text-xs font-bold hover:bg-blue-100 transition-colors cursor-pointer">
+                <Upload size={14} />
+                <span>New File</span>
+                <input 
+                  type="file" 
+                  accept="application/pdf" 
+                  className="hidden" 
+                  onChange={(e) => {
+                      if(confirm("Replace current file?")) handleFileUpload(e);
+                  }}
+                />
+            </label>
         </div>
         
         {/* Toolbar Center */}
@@ -424,7 +459,7 @@ function App() {
                 className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg hover:shadow-slate-300 active:scale-95"
             >
                 {isLoading ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
-                <span className="hidden sm:inline">Download</span>
+                <span className="hidden sm:inline">Download PDF</span>
             </button>
         </div>
       </header>
@@ -432,37 +467,63 @@ function App() {
       {/* --- MAIN LAYOUT --- */}
       <div className="flex flex-1 overflow-hidden relative">
         
-        {/* LEFT TOOLBAR (Tools) */}
-        <div className="w-16 md:w-20 bg-white border-r border-slate-200 flex flex-col items-center py-6 gap-6 z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
-            <button 
-                onClick={() => setShowSigModal(true)} 
-                className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center hover:bg-blue-600 hover:text-white transition-all shadow-sm hover:shadow-blue-200 group"
-                title="Add Signature"
-            >
-                <PenTool size={24} className="group-hover:scale-110 transition-transform" />
-            </button>
+        {/* LEFT SIDEBAR (Expanded) */}
+        <div className="w-64 bg-white border-r border-slate-200 flex flex-col p-4 gap-4 z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)] overflow-y-auto">
             
-            <button 
-                onClick={() => handleQuickAction('date')} 
-                className="w-10 h-10 text-slate-400 hover:bg-slate-50 hover:text-slate-700 rounded-xl flex items-center justify-center transition-all"
-                title="Add Date"
-            >
-                <Calendar size={22} />
-            </button>
-
-            <div className="relative group">
-                <button className="w-10 h-10 text-slate-400 hover:bg-slate-50 hover:text-slate-700 rounded-xl flex items-center justify-center transition-all">
-                    <Stamp size={22} />
+            <div className="space-y-3">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">Essentials</p>
+                <button 
+                    onClick={() => setShowSigModal(true)} 
+                    className="w-full bg-blue-600 text-white p-3 rounded-xl flex items-center justify-start gap-3 hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 group active:scale-95"
+                >
+                    <div className="bg-white/20 p-1.5 rounded-lg"><PenTool size={20} className="text-white" /></div>
+                    <span className="font-bold">Add Signature</span>
                 </button>
-                {/* Stamp Popover */}
-                <div className="absolute left-full top-0 ml-2 bg-white rounded-xl shadow-xl border border-slate-100 p-2 w-40 hidden group-hover:block z-50">
-                    <p className="text-xs font-bold text-slate-400 px-2 py-1 mb-1">STAMPS</p>
-                    {STAMPS.map(stamp => (
+                
+                <button 
+                    onClick={() => handleQuickAction('date')} 
+                    className="w-full bg-white border border-slate-200 text-slate-700 p-3 rounded-xl flex items-center justify-start gap-3 hover:bg-slate-50 hover:border-blue-300 transition-all shadow-sm active:scale-95"
+                >
+                    <div className="bg-slate-100 p-1.5 rounded-lg"><Calendar size={20} className="text-slate-600" /></div>
+                    <span className="font-medium">Add Date</span>
+                </button>
+
+                <button 
+                    onClick={() => handleQuickAction('text')} 
+                    className="w-full bg-white border border-slate-200 text-slate-700 p-3 rounded-xl flex items-center justify-start gap-3 hover:bg-slate-50 hover:border-blue-300 transition-all shadow-sm active:scale-95"
+                >
+                    <div className="bg-slate-100 p-1.5 rounded-lg"><ALargeSmall size={20} className="text-slate-600" /></div>
+                    <span className="font-medium">Add Text</span>
+                </button>
+            </div>
+
+            <div className="space-y-3 mt-2">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">Quick Symbols</p>
+                <div className="grid grid-cols-2 gap-2">
+                    <button 
+                         onClick={() => handleQuickAction('symbol', { symbol: '✓', color: '#16a34a' })}
+                         className="flex items-center justify-center gap-2 p-2 rounded-lg border border-slate-200 hover:bg-green-50 hover:border-green-200 hover:text-green-600 transition-all"
+                    >
+                        <Check size={18} />
+                    </button>
+                    <button 
+                         onClick={() => handleQuickAction('symbol', { symbol: '✕', color: '#dc2626' })}
+                         className="flex items-center justify-center gap-2 p-2 rounded-lg border border-slate-200 hover:bg-red-50 hover:border-red-200 hover:text-red-600 transition-all"
+                    >
+                        <X size={18} />
+                    </button>
+                </div>
+            </div>
+
+            <div className="space-y-3 mt-2">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">Stamps</p>
+                <div className="grid grid-cols-2 gap-2">
+                    {STAMPS.slice(0, 6).map(stamp => (
                         <button 
                             key={stamp.label} 
                             onClick={() => handleQuickAction('stamp', stamp)}
-                            className="w-full text-left px-3 py-2 text-xs font-bold rounded-lg hover:bg-slate-50 transition-colors mb-1"
-                            style={{ color: stamp.color, border: `1px solid ${stamp.borderColor}` }}
+                            className="w-full text-center px-2 py-2 text-[10px] font-bold rounded-lg border hover:opacity-80 transition-all"
+                            style={{ color: stamp.color, borderColor: stamp.borderColor, backgroundColor: `${stamp.color}10` }}
                         >
                             {stamp.label}
                         </button>
@@ -470,28 +531,31 @@ function App() {
                 </div>
             </div>
 
-            <div className="w-8 h-px bg-slate-200 my-2"></div>
-
-             <button 
-                onClick={() => setFitToWidth(!fitToWidth)} 
-                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${fitToWidth ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50'}`}
-                title="Fit Width"
-            >
-                <Maximize2 size={20} />
-            </button>
+            <div className="mt-auto pt-4 border-t border-slate-100">
+                 <button 
+                    onClick={() => setFitToWidth(!fitToWidth)} 
+                    className="flex items-center gap-3 w-full p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all text-sm font-medium"
+                >
+                    <Maximize2 size={18} />
+                    {fitToWidth ? 'Original Size' : 'Fit to Width'}
+                </button>
+            </div>
         </div>
 
         {/* CENTER SCROLLABLE AREA */}
         <div 
             className={`flex-1 overflow-auto bg-slate-100/50 relative p-4 md:p-10 transition-colors duration-200 ${placingItem ? 'cursor-crosshair-custom' : ''}`} 
             ref={containerRef}
-            onClick={() => setSelectedSigId(null)}
+            onClick={() => {
+                // Clicking background deselects
+                setSelectedSigId(null);
+            }}
         >
             <div className="max-w-max mx-auto flex flex-col items-center gap-8 min-h-full pb-20">
                 {pages.map((page, index) => (
                     <div 
                         key={index} 
-                        className="relative bg-white shadow-xl transition-all duration-200 group"
+                        className="relative bg-white shadow-xl transition-all duration-200"
                         style={{ 
                             width: fitToWidth ? '100%' : page.width * zoom, 
                             height: fitToWidth ? 'auto' : page.height * zoom,
@@ -519,13 +583,19 @@ function App() {
                                     opacity: sig.opacity ?? 1,
                                 }}
                                 onMouseDown={(e) => handleMouseDown(e, sig.id)}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedSigId(sig.id);
+                                }}
                             >
-                                <div className={`w-full h-full relative ${selectedSigId === sig.id ? 'ring-2 ring-blue-500 ring-offset-4 ring-offset-transparent' : 'hover:ring-1 hover:ring-blue-300 hover:ring-dashed'}`}>
-                                    {sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE ? (
+                                <div className={`w-full h-full relative transition-all duration-150 ${selectedSigId === sig.id ? 'ring-2 ring-blue-500 ring-offset-4 ring-offset-transparent' : 'group-hover/sig:ring-1 group-hover/sig:ring-blue-300 group-hover/sig:ring-dashed'}`}>
+                                    
+                                    {/* CONTENT RENDERING */}
+                                    {sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE || sig.type === SignatureType.PLAINTEXT ? (
                                         <div 
                                             className="w-full h-full flex items-center p-1 leading-none whitespace-nowrap overflow-visible"
                                             style={{
-                                                fontFamily: sig.fontFamily,
+                                                fontFamily: sig.type === SignatureType.PLAINTEXT ? 'Helvetica, Arial, sans-serif' : sig.fontFamily,
                                                 color: sig.color,
                                                 fontWeight: sig.isBold ? 'bold' : 'normal',
                                                 fontStyle: sig.isItalic ? 'italic' : 'normal',
@@ -547,35 +617,44 @@ function App() {
                                         >
                                             {sig.content}
                                         </div>
+                                    ) : sig.type === SignatureType.SYMBOL ? (
+                                         <div 
+                                            className="w-full h-full flex items-center justify-center"
+                                            style={{
+                                                color: sig.color,
+                                                fontSize: `${(sig.fontSize || 40) * zoom}px`,
+                                                fontWeight: 'bold',
+                                            }}
+                                        >
+                                            {sig.content}
+                                        </div>
                                     ) : (
                                         <img src={sig.content} className="w-full h-full object-contain pointer-events-none" alt="signature" />
                                     )}
 
-                                    {/* Edit Controls */}
-                                    {selectedSigId === sig.id && (
-                                        <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-800 text-white rounded-lg flex items-center p-1.5 shadow-xl gap-2 z-50 pointer-events-auto scale-100 origin-bottom animate-in fade-in slide-in-from-bottom-2">
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); updateSignatureProp(sig.id, 'rotation', (sig.rotation || 0) - 90) }} 
-                                                className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white" title="Rotate"
-                                            >
-                                                <RotateCw size={14}/>
-                                            </button>
-                                            <div className="w-px h-3 bg-slate-600"></div>
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); duplicateSignature(sig.id); }} 
-                                                className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white" title="Duplicate"
-                                            >
-                                                <Copy size={14}/>
-                                            </button>
-                                            <div className="w-px h-3 bg-slate-600"></div>
-                                            <button 
-                                                onClick={(e) => { e.stopPropagation(); deleteSignature(sig.id); }} 
-                                                className="p-1 hover:bg-red-900/50 rounded text-red-400 hover:text-red-300" title="Delete"
-                                            >
-                                                <Trash2 size={14}/>
-                                            </button>
-                                        </div>
-                                    )}
+                                    {/* Edit Controls - Visible on Hover OR Select */}
+                                    <div className={`absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-800 text-white rounded-lg flex items-center p-1.5 shadow-xl gap-2 z-50 pointer-events-auto scale-100 origin-bottom transition-opacity duration-200 ${selectedSigId === sig.id || 'opacity-0 group-hover/sig:opacity-100'}`}>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); updateSignatureProp(sig.id, 'rotation', (sig.rotation || 0) - 90) }} 
+                                            className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white" title="Rotate"
+                                        >
+                                            <RotateCw size={14}/>
+                                        </button>
+                                        <div className="w-px h-3 bg-slate-600"></div>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); duplicateSignature(sig.id); }} 
+                                            className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white" title="Duplicate"
+                                        >
+                                            <Copy size={14}/>
+                                        </button>
+                                        <div className="w-px h-3 bg-slate-600"></div>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); deleteSignature(sig.id); }} 
+                                            className="p-1 hover:bg-red-900/50 rounded text-red-400 hover:text-red-300" title="Delete"
+                                        >
+                                            <Trash2 size={14}/>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -584,7 +663,7 @@ function App() {
             </div>
         </div>
 
-        {/* RIGHT SIDEBAR (Stats) - Collapsible on small screens */}
+        {/* RIGHT SIDEBAR (Stats) */}
         <div className="hidden lg:block w-72 bg-white border-l border-slate-200 p-6 z-10 overflow-y-auto">
              <div className="mb-6">
                 <h2 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-4">Document Analysis</h2>
@@ -620,6 +699,18 @@ function App() {
                                 className="w-full accent-blue-600"
                             />
                         </div>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-500 mb-1 block">Size</label>
+                            <input 
+                                type="range" 
+                                min="10" 
+                                max="200" 
+                                step="2"
+                                defaultValue="32"
+                                onChange={(e) => updateSignatureProp(selectedSigId, 'fontSize', parseInt(e.target.value))}
+                                className="w-full accent-blue-600"
+                            />
+                        </div>
                     </div>
                  </div>
              )}
@@ -637,19 +728,19 @@ function App() {
       {/* --- GHOST CURSOR FOR PLACEMENT --- */}
       {placingItem && (
         <div 
-            className="fixed pointer-events-none z-50 opacity-50"
+            className="fixed pointer-events-none z-50 opacity-60"
             style={{ 
                 left: mousePos.x, 
                 top: mousePos.y,
                 transform: 'translate(-50%, -50%)'
             }}
         >
-            {placingItem.type === SignatureType.TEXT || placingItem.type === SignatureType.DATE ? (
+            {placingItem.type === SignatureType.TEXT || placingItem.type === SignatureType.DATE || placingItem.type === SignatureType.PLAINTEXT ? (
                 <div 
                     style={{
-                        fontFamily: placingItem.style.fontFamily,
+                        fontFamily: placingItem.type === SignatureType.PLAINTEXT ? 'Helvetica' : placingItem.style.fontFamily,
                         color: placingItem.style.color,
-                        fontSize: '24px',
+                        fontSize: '32px',
                         whiteSpace: 'nowrap'
                     }}
                 >
@@ -661,13 +752,15 @@ function App() {
                     style={{
                         borderColor: placingItem.style.color,
                         color: placingItem.style.color,
+                        fontSize: '24px',
+                        minWidth: '150px'
                     }}
                 >
                     {placingItem.content}
                 </div>
             ) : (
-                <div className="bg-blue-100 border-2 border-blue-400 p-2 rounded text-xs text-blue-700 font-bold whitespace-nowrap">
-                    Click to place signature
+                <div className="bg-blue-100 border-2 border-blue-400 p-2 rounded text-xs text-blue-700 font-bold whitespace-nowrap shadow-xl">
+                    Click to Place
                 </div>
             )}
         </div>
@@ -676,11 +769,11 @@ function App() {
       {/* --- MODAL --- */}
       {showSigModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-            <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden transform transition-all scale-100">
+            <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl flex flex-col h-[85vh] overflow-hidden transform transition-all scale-100">
                 <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-white">
                     <div>
                         <h3 className="text-xl font-bold text-slate-800">Create Signature</h3>
-                        <p className="text-sm text-slate-400">Choose how you want to sign</p>
+                        <p className="text-sm text-slate-400">Customize your digital signature</p>
                     </div>
                     <button onClick={() => setShowSigModal(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400 hover:text-slate-600"><X size={20} /></button>
                 </div>
@@ -691,66 +784,83 @@ function App() {
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab as any)}
-                            className={`flex-1 py-2.5 text-sm font-bold rounded-xl capitalize transition-all flex items-center justify-center gap-2 ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm ring-1 ring-black/5' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100/50'}`}
+                            className={`flex-1 py-3 text-sm font-bold rounded-xl capitalize transition-all flex items-center justify-center gap-2 ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm ring-1 ring-black/5' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100/50'}`}
                         >
-                            {tab === 'type' && <Type size={16} />}
-                            {tab === 'draw' && <PenTool size={16} />}
-                            {tab === 'image' && <ImageIcon size={16} />}
+                            {tab === 'type' && <Type size={18} />}
+                            {tab === 'draw' && <PenTool size={18} />}
+                            {tab === 'image' && <ImageIcon size={18} />}
                             {tab}
                         </button>
                     ))}
                 </div>
 
-                <div className="p-8 overflow-y-auto bg-white min-h-[300px]">
+                <div className="flex-1 overflow-y-auto bg-white p-6 md:p-8">
                     {activeTab === 'type' && (
-                        <div className="space-y-6">
+                        <div className="flex flex-col h-full">
                             <input
                                 type="text"
                                 placeholder="Type your name..."
                                 value={typedName}
                                 onChange={(e) => setTypedName(e.target.value)}
-                                className="w-full text-3xl p-4 border-b-2 border-slate-200 focus:border-blue-500 focus:outline-none bg-transparent text-center font-medium placeholder:text-slate-300"
+                                className="w-full text-4xl p-4 border-b-2 border-slate-200 focus:border-blue-500 focus:outline-none bg-transparent text-center font-medium placeholder:text-slate-300 mb-8"
                                 autoFocus
                             />
                             
                             {/* Styling Tools */}
-                            <div className="flex items-center justify-center gap-4 bg-slate-50 p-2 rounded-2xl border border-slate-100 w-max mx-auto">
-                                <button onClick={() => setIsBold(!isBold)} className={`p-2.5 rounded-xl transition-all ${isBold ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}><Bold size={18}/></button>
-                                <button onClick={() => setIsItalic(!isItalic)} className={`p-2.5 rounded-xl transition-all ${isItalic ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}><Italic size={18}/></button>
-                                <div className="h-6 w-px bg-slate-200"></div>
-                                <div className="flex gap-2">
+                            <div className="flex flex-wrap items-center justify-center gap-4 bg-slate-50 p-3 rounded-2xl border border-slate-100 w-full max-w-3xl mx-auto mb-8">
+                                <button onClick={() => setIsBold(!isBold)} className={`p-3 rounded-xl transition-all ${isBold ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="Bold"><Bold size={20}/></button>
+                                <button onClick={() => setIsItalic(!isItalic)} className={`p-3 rounded-xl transition-all ${isItalic ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`} title="Italic"><Italic size={20}/></button>
+                                <div className="h-8 w-px bg-slate-200 mx-2"></div>
+                                <div className="flex gap-3 items-center flex-wrap justify-center">
                                     {COLORS.map(c => (
                                         <button 
                                             key={c}
                                             onClick={() => setSelectedColor(c)}
-                                            className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${selectedColor === c ? 'border-slate-400 scale-110 shadow-sm' : 'border-transparent'}`}
+                                            className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${selectedColor === c ? 'border-slate-400 scale-110 shadow-sm ring-2 ring-slate-200' : 'border-transparent'}`}
                                             style={{ backgroundColor: c }}
+                                            title={c}
                                         />
                                     ))}
+                                    {/* Custom Color Input */}
+                                    <div className="relative group">
+                                         <label className="w-8 h-8 rounded-full border-2 border-slate-200 flex items-center justify-center cursor-pointer hover:scale-110 transition-transform bg-gradient-to-br from-red-500 via-green-500 to-blue-500">
+                                            <input 
+                                                type="color" 
+                                                value={customColor}
+                                                onChange={(e) => {
+                                                    setCustomColor(e.target.value);
+                                                    setSelectedColor(e.target.value);
+                                                }}
+                                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                            />
+                                         </label>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 h-56 overflow-y-auto pr-2 pb-2">
-                                {SIGNATURE_FONTS.map(font => (
-                                    <button
-                                        key={font}
-                                        onClick={() => setSelectedFont(font)}
-                                        className={`p-4 border rounded-xl hover:border-blue-300 transition-all text-center group relative overflow-hidden ${selectedFont === font ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-slate-100 hover:shadow-md'}`}
-                                    >
-                                        <span 
-                                            className="text-3xl block mb-2" 
-                                            style={{ 
-                                                fontFamily: font, 
-                                                color: selectedColor,
-                                                fontWeight: isBold ? 'bold' : 'normal',
-                                                fontStyle: isItalic ? 'italic' : 'normal',
-                                            }}
+                            <div className="flex-1 overflow-y-auto">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4">
+                                    {SIGNATURE_FONTS.map(font => (
+                                        <button
+                                            key={font}
+                                            onClick={() => setSelectedFont(font)}
+                                            className={`p-8 border rounded-2xl hover:border-blue-300 transition-all text-center group relative overflow-hidden flex items-center justify-center min-h-[120px] ${selectedFont === font ? 'border-blue-500 bg-blue-50/50 ring-1 ring-blue-500 shadow-md' : 'border-slate-100 hover:shadow-lg hover:-translate-y-1'}`}
                                         >
-                                            {typedName || 'Signature'}
-                                        </span>
-                                        <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold group-hover:text-blue-400">{font}</p>
-                                    </button>
-                                ))}
+                                            <span 
+                                                className="text-5xl block w-full truncate px-4" 
+                                                style={{ 
+                                                    fontFamily: font, 
+                                                    color: selectedColor,
+                                                    fontWeight: isBold ? 'bold' : 'normal',
+                                                    fontStyle: isItalic ? 'italic' : 'normal',
+                                                }}
+                                            >
+                                                {typedName || 'Signature'}
+                                            </span>
+                                            <p className="absolute bottom-2 right-4 text-[10px] text-slate-300 uppercase tracking-wider font-bold group-hover:text-blue-400 transition-colors">{font}</p>
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     )}
@@ -763,7 +873,7 @@ function App() {
                                     <button 
                                         key={c}
                                         onClick={() => setSelectedColor(c)}
-                                        className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${selectedColor === c ? 'border-slate-400 scale-110 shadow-sm' : 'border-transparent'}`}
+                                        className={`w-10 h-10 rounded-full border-2 transition-transform hover:scale-110 ${selectedColor === c ? 'border-slate-400 scale-110 shadow-sm' : 'border-transparent'}`}
                                         style={{ backgroundColor: c }}
                                     />
                                 ))}
@@ -810,8 +920,9 @@ function App() {
                         <button 
                             onClick={handleCreateSignature}
                             disabled={(activeTab === 'type' && !typedName) || (activeTab === 'draw' && !drawnData) || (activeTab === 'image' && !uploadedSigImage)}
-                            className="px-8 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed hover:-translate-y-0.5 transition-all active:translate-y-0"
+                            className="px-8 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed hover:-translate-y-0.5 transition-all active:translate-y-0 flex items-center gap-2"
                         >
+                            <Check size={18} />
                             Create & Place
                         </button>
                     </div>

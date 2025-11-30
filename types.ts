@@ -7,10 +7,12 @@ export interface UploadedFile {
 
 export enum SignatureType {
   DRAWING = 'DRAWING',
-  TEXT = 'TEXT',
+  TEXT = 'TEXT', // Signature Text
+  PLAINTEXT = 'PLAINTEXT', // Standard Form Text
   IMAGE = 'IMAGE',
   DATE = 'DATE',
-  STAMP = 'STAMP'
+  STAMP = 'STAMP',
+  SYMBOL = 'SYMBOL'
 }
 
 export interface SignatureItem {
@@ -72,22 +74,24 @@ export const SIGNATURE_FONTS = [
 
 export const COLORS = [
   '#000000', // Black
-  '#1e3a8a', // Dark Blue
+  '#2563eb', // Bright Blue (Requested)
+  '#16a34a', // Bright Green (Requested)
   '#dc2626', // Red
-  '#166534', // Green
-  '#5b21b6', // Purple
+  '#1e3a8a', // Dark Blue
+  '#166534', // Dark Green
   '#9a3412', // Orange
-  '#0f172a', // Slate
+  '#5b21b6', // Purple
   '#4a044e', // Fuchsia
-  '#ea580c', // Burnt Orange
-  '#0891b2', // Cyan
-  '#be185d', // Pink
+  '#0f172a', // Slate
 ];
 
 export const STAMPS = [
-  { label: 'APPROVED', color: '#166534', borderColor: '#166534' },
+  { label: 'APPROVED', color: '#16a34a', borderColor: '#16a34a' },
   { label: 'REJECTED', color: '#dc2626', borderColor: '#dc2626' },
-  { label: 'CONFIDENTIAL', color: '#9a3412', borderColor: '#9a3412' },
+  { label: 'CONFIDENTIAL', color: '#ea580c', borderColor: '#ea580c' },
   { label: 'DRAFT', color: '#64748b', borderColor: '#64748b' },
-  { label: 'COMPLETED', color: '#1e3a8a', borderColor: '#1e3a8a' },
+  { label: 'COMPLETED', color: '#2563eb', borderColor: '#2563eb' },
+  { label: 'URGENT', color: '#dc2626', borderColor: '#dc2626' },
+  { label: 'PAID', color: '#16a34a', borderColor: '#16a34a' },
+  { label: 'COPY', color: '#475569', borderColor: '#475569' },
 ];
