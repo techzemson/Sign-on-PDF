@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, FileText, ChevronLeft, ChevronRight, X, Download, MousePointer, Type, Image as ImageIcon, PenTool, Check, Trash2, Copy, Move, Maximize2, Palette, Bold, Italic, Loader2, ZoomIn, ZoomOut, RotateCw, Undo, Redo, Calendar, Stamp, FileCheck, RefreshCw, Eraser, Plus, ALargeSmall } from 'lucide-react';
+import { Upload, FileText, ChevronLeft, ChevronRight, X, Download, MousePointer, Type, Image as ImageIcon, PenTool, Check, Trash2, Copy, Move, Maximize2, Palette, Bold, Italic, Loader2, ZoomIn, ZoomOut, RotateCw, Undo, Redo, Calendar, Stamp, FileCheck, RefreshCw, Eraser, Plus, ALargeSmall, AlertTriangle } from 'lucide-react';
 import { UploadedFile, PDFPageInfo, SignatureItem, SignatureType, DocStats, SIGNATURE_FONTS, COLORS, STAMPS, DATE_FORMATS } from './types';
 import { loadPDF, generateSignedPDF } from './services/pdfService';
 import StatsChart from './components/StatsChart';
@@ -21,6 +21,7 @@ function App() {
   // View Controls
   const [zoom, setZoom] = useState(1);
   const [fitToWidth, setFitToWidth] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   
   // Placement State (The "Ghost" item)
   const [placingItem, setPlacingItem] = useState<{
@@ -31,6 +32,7 @@ function App() {
 
   // Interaction State
   const [selectedSigId, setSelectedSigId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null); // For in-place text editing
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 });
@@ -88,10 +90,13 @@ function App() {
   // Reset/Home Handler
   const handleReset = () => {
     if (signatures.length > 0) {
-        const confirmReset = window.confirm("You have unsaved changes. Are you sure you want to upload a new PDF?");
-        if (!confirmReset) return;
+        setShowResetConfirm(true);
+    } else {
+        performReset();
     }
-    
+  };
+
+  const performReset = () => {
     // Reset all state
     setFile(null);
     setPages([]);
@@ -101,9 +106,11 @@ function App() {
     setHistoryIndex(-1);
     setPlacingItem(null);
     setSelectedSigId(null);
+    setEditingId(null);
     setZoom(1);
     setIsLoading(false);
     setProgress(0);
+    setShowResetConfirm(false);
   };
 
   // Upload Handler
@@ -302,11 +309,19 @@ function App() {
     pushToHistory([...signatures, newSig]);
     setPlacingItem(null); 
     setSelectedSigId(newSig.id);
+
+    // Auto-enter edit mode for text types
+    if (newSig.type === SignatureType.PLAINTEXT || newSig.type === SignatureType.TEXT) {
+        setEditingId(newSig.id);
+    }
   };
 
   // --- MOUSE INTERACTIONS (Drag & Resize) ---
 
   const handleMouseDown = (e: React.MouseEvent, id: string) => {
+    // If editing, allow mouse events to propagate to textarea
+    if (editingId === id) return;
+
     e.stopPropagation(); // Prevent page click
     e.preventDefault();
     setSelectedSigId(id);
@@ -396,7 +411,6 @@ function App() {
                 }
 
                 // --- SMART RESIZE LOGIC (FIXED) ---
-                // We now use itemStartPos.fontSize as the anchor to prevent exponential compounding errors.
                 if (sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE || sig.type === SignatureType.PLAINTEXT) {
                     // 1. Calculate new Font Size based on Height ratio from START height
                     const heightRatio = newH / itemStartPos.h;
@@ -471,14 +485,21 @@ function App() {
   // Key Listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle delete if editing text
+      if (editingId) return;
+
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedSigId) {
          if (document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
             deleteSignature(selectedSigId);
          }
       }
       if (e.key === 'Escape') {
-          setPlacingItem(null);
-          setSelectedSigId(null);
+          if (editingId) {
+            setEditingId(null);
+          } else {
+            setPlacingItem(null);
+            setSelectedSigId(null);
+          }
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
           undo();
@@ -489,7 +510,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedSigId, history, historyIndex]);
+  }, [selectedSigId, history, historyIndex, editingId]);
 
 
   const deleteSignature = (id: string) => {
@@ -515,10 +536,7 @@ function App() {
   const handleTextEdit = (id: string) => {
       const sig = signatures.find(s => s.id === id);
       if (sig && (sig.type === SignatureType.PLAINTEXT || sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE)) {
-          const newText = prompt("Edit text:", sig.content);
-          if (newText !== null && newText !== sig.content) {
-              updateSignatureProp(id, 'content', newText);
-          }
+          setEditingId(id);
       }
   };
 
@@ -638,7 +656,7 @@ function App() {
                 <span className="font-bold text-lg text-slate-800 hidden md:inline truncate max-w-[200px]">{file.name}</span>
             </div>
             
-            {/* UPDATED: Upload Another Button - Visible on all devices */}
+            {/* UPDATED: Upload Another Button - Calls handleReset which uses custom modal */}
             <button 
                 onClick={handleReset}
                 className="flex items-center gap-2 px-3 py-2 md:px-4 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all cursor-pointer shadow-md hover:shadow-lg"
@@ -782,7 +800,7 @@ function App() {
                                     height: sig.height * zoom,
                                     transform: `rotate(${sig.rotation || 0}deg)`,
                                     opacity: sig.opacity ?? 1,
-                                    cursor: isResizing ? 'default' : 'move'
+                                    cursor: isResizing || editingId === sig.id ? 'default' : 'move'
                                 }}
                                 onMouseDown={(e) => handleMouseDown(e, sig.id)}
                                 onDoubleClick={(e) => { e.stopPropagation(); handleTextEdit(sig.id); }}
@@ -791,10 +809,10 @@ function App() {
                                     setSelectedSigId(sig.id);
                                 }}
                             >
-                                <div className={`w-full h-full relative transition-all duration-150 ${selectedSigId === sig.id ? 'ring-2 ring-blue-500 ring-offset-4 ring-offset-transparent' : 'group-hover/sig:ring-1 group-hover/sig:ring-blue-300 group-hover/sig:ring-dashed'}`}>
+                                <div className={`w-full h-full relative transition-all duration-150 ${selectedSigId === sig.id && !editingId ? 'ring-2 ring-blue-500 ring-offset-4 ring-offset-transparent' : 'group-hover/sig:ring-1 group-hover/sig:ring-blue-300 group-hover/sig:ring-dashed'}`}>
                                     
-                                    {/* RESIZE HANDLES (Only when selected) */}
-                                    {selectedSigId === sig.id && (
+                                    {/* RESIZE HANDLES (Only when selected and not editing) */}
+                                    {selectedSigId === sig.id && !editingId && (
                                         <>
                                             <div className="resize-handle -top-1.5 -left-1.5 cursor-nw-resize" onMouseDown={(e) => handleResizeStart(e, sig.id, 'nw')} />
                                             <div className="resize-handle -top-1.5 -right-1.5 cursor-ne-resize" onMouseDown={(e) => handleResizeStart(e, sig.id, 'ne')} />
@@ -805,18 +823,36 @@ function App() {
 
                                     {/* CONTENT */}
                                     {sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE || sig.type === SignatureType.PLAINTEXT ? (
-                                        <div 
-                                            className="w-full h-full flex items-center p-1 leading-none whitespace-nowrap overflow-hidden"
-                                            style={{
-                                                fontFamily: sig.type === SignatureType.PLAINTEXT ? 'Helvetica, Arial, sans-serif' : sig.fontFamily,
-                                                color: sig.color,
-                                                fontWeight: sig.isBold ? 'bold' : 'normal',
-                                                fontStyle: sig.isItalic ? 'italic' : 'normal',
-                                                fontSize: `${(sig.fontSize || 32) * zoom}px`
-                                            }}
-                                        >
-                                            {sig.content}
-                                        </div>
+                                        editingId === sig.id ? (
+                                            <textarea
+                                                autoFocus
+                                                value={sig.content}
+                                                onChange={(e) => updateSignatureProp(sig.id, 'content', e.target.value)}
+                                                onBlur={() => setEditingId(null)}
+                                                className="w-full h-full resize-none bg-transparent outline-none overflow-hidden p-1 leading-none"
+                                                style={{
+                                                    fontFamily: sig.type === SignatureType.PLAINTEXT ? 'Helvetica, Arial, sans-serif' : sig.fontFamily,
+                                                    color: sig.color,
+                                                    fontWeight: sig.isBold ? 'bold' : 'normal',
+                                                    fontStyle: sig.isItalic ? 'italic' : 'normal',
+                                                    fontSize: `${(sig.fontSize || 32) * zoom}px`
+                                                }}
+                                                onMouseDown={(e) => e.stopPropagation()} // Allow text selection
+                                            />
+                                        ) : (
+                                            <div 
+                                                className="w-full h-full flex items-center p-1 leading-none whitespace-nowrap overflow-hidden"
+                                                style={{
+                                                    fontFamily: sig.type === SignatureType.PLAINTEXT ? 'Helvetica, Arial, sans-serif' : sig.fontFamily,
+                                                    color: sig.color,
+                                                    fontWeight: sig.isBold ? 'bold' : 'normal',
+                                                    fontStyle: sig.isItalic ? 'italic' : 'normal',
+                                                    fontSize: `${(sig.fontSize || 32) * zoom}px`
+                                                }}
+                                            >
+                                                {sig.content}
+                                            </div>
+                                        )
                                     ) : sig.type === SignatureType.STAMP ? (
                                         <div 
                                             className="w-full h-full flex items-center justify-center p-1 border-4"
@@ -846,7 +882,7 @@ function App() {
                                     )}
 
                                     {/* Edit Controls */}
-                                    {selectedSigId === sig.id && !isResizing && !isDragging && (
+                                    {selectedSigId === sig.id && !isResizing && !isDragging && !editingId && (
                                         <div className="absolute -top-14 left-1/2 -translate-x-1/2 bg-slate-800 text-white rounded-lg flex items-center p-1.5 shadow-xl gap-2 z-50 pointer-events-auto">
                                              {/* Date Format Helper in Floating Toolbar */}
                                              {sig.type === SignatureType.DATE && (
@@ -1032,6 +1068,39 @@ function App() {
                     Click to Place
                 </div>
             )}
+        </div>
+      )}
+
+      {/* --- RESET CONFIRMATION MODAL --- */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-slate-900/50 z-[60] flex items-center justify-center backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full border border-slate-100">
+                <div className="flex flex-col items-center text-center gap-4">
+                    <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center">
+                        <AlertTriangle size={24} />
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-bold text-slate-800">Upload New File?</h3>
+                        <p className="text-sm text-slate-500 mt-1">
+                            Your current signatures will be lost. Are you sure you want to continue?
+                        </p>
+                    </div>
+                    <div className="flex gap-3 w-full mt-2">
+                         <button 
+                            onClick={() => setShowResetConfirm(false)}
+                            className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-colors"
+                         >
+                            Cancel
+                         </button>
+                         <button 
+                            onClick={performReset}
+                            className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-colors"
+                         >
+                            Yes, Upload
+                         </button>
+                    </div>
+                </div>
+            </div>
         </div>
       )}
 
