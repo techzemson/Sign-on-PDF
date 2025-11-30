@@ -87,9 +87,12 @@ function App() {
 
   // Reset/Home Handler
   const handleReset = () => {
-    if (signatures.length > 0 && !confirm("Are you sure? Unsaved changes will be lost.")) {
-      return;
+    if (signatures.length > 0) {
+        const confirmReset = window.confirm("You have unsaved changes. Are you sure you want to upload a new PDF?");
+        if (!confirmReset) return;
     }
+    
+    // Reset all state
     setFile(null);
     setPages([]);
     setStats(null);
@@ -233,6 +236,19 @@ function App() {
       setPlacingItem({ type: itemType, content, style });
   };
 
+  // Helper to measure text width
+  const calculateTextWidth = (text: string, fontSize: number, fontFamily: string, isBold: boolean, isItalic: boolean) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+          const fontName = fontFamily.includes(' ') ? `"${fontFamily}"` : fontFamily;
+          ctx.font = `${isBold ? 'bold ' : ''}${isItalic ? 'italic ' : ''}${fontSize}px ${fontName}`;
+          // Add some padding (0.5em) to prevent edge clipping
+          return ctx.measureText(text).width + (fontSize * 0.5); 
+      }
+      return 200;
+  };
+
   // Place Signature on Click
   const handlePageClick = (e: React.MouseEvent, pageIndex: number) => {
     if (!placingItem) {
@@ -244,17 +260,6 @@ function App() {
     const x = (e.clientX - rect.left) / zoom;
     const y = (e.clientY - rect.top) / zoom;
 
-    // Helper to measure text width approximately to set initial width
-    const measureText = (text: string, fontSize: number, font: string) => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-            ctx.font = `${fontSize}px ${font}`;
-            return ctx.measureText(text).width + 20; // + padding
-        }
-        return 200;
-    };
-
     // Default dimensions based on type
     let width = 200;
     let height = 60;
@@ -265,15 +270,16 @@ function App() {
     } else if (placingItem.type === SignatureType.SYMBOL) {
         width = 50;
         height = 50;
-    } else if (placingItem.type === SignatureType.PLAINTEXT) {
-        height = placingItem.style.fontSize * 1.5;
-        width = measureText(placingItem.content, placingItem.style.fontSize, placingItem.style.fontFamily);
-    } else if (placingItem.type === SignatureType.DATE) {
-        height = placingItem.style.fontSize * 1.5;
-        width = measureText(placingItem.content, placingItem.style.fontSize, placingItem.style.fontFamily);
-    } else if (placingItem.type === SignatureType.TEXT) {
+    } else if (placingItem.type === SignatureType.PLAINTEXT || placingItem.type === SignatureType.TEXT || placingItem.type === SignatureType.DATE) {
          height = placingItem.style.fontSize * 1.5;
-         width = measureText(placingItem.content, placingItem.style.fontSize, placingItem.style.fontFamily);
+         const fontFamily = placingItem.type === SignatureType.PLAINTEXT ? 'Helvetica' : (placingItem.style.fontFamily || 'Arial');
+         width = calculateTextWidth(
+             placingItem.content, 
+             placingItem.style.fontSize, 
+             fontFamily, 
+             placingItem.style.isBold, 
+             placingItem.style.isItalic
+         );
     } else if (placingItem.type === SignatureType.DRAWING || placingItem.type === SignatureType.IMAGE) {
         width = 150;
         height = 80;
@@ -506,37 +512,41 @@ function App() {
     }
   };
 
+  const handleTextEdit = (id: string) => {
+      const sig = signatures.find(s => s.id === id);
+      if (sig && (sig.type === SignatureType.PLAINTEXT || sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE)) {
+          const newText = prompt("Edit text:", sig.content);
+          if (newText !== null && newText !== sig.content) {
+              updateSignatureProp(id, 'content', newText);
+          }
+      }
+  };
+
   const updateSignatureProp = (id: string, prop: keyof SignatureItem, value: any) => {
       setSignatures(prev => prev.map(s => {
           if (s.id === id) {
               const updated = { ...s, [prop]: value };
               
-              // If updating format, re-generate content immediately AND recalculate width
-              if (prop === 'dateFormat' && s.originalDateTimestamp) {
-                  const newContent = getFormattedDate(value, new Date(s.originalDateTimestamp));
-                  updated.content = newContent;
+              // Helper to decide font family
+              const getFont = (item: SignatureItem) => 
+                  item.type === SignatureType.PLAINTEXT ? 'Helvetica, Arial' : (item.fontFamily || 'Arial');
 
-                  // Auto-resize width for the new date string to prevent clipping
-                  const canvas = document.createElement('canvas');
-                  const ctx = canvas.getContext('2d');
-                  if (ctx) {
-                      const fontSize = s.fontSize || 24;
-                      ctx.font = `${s.isBold ? 'bold ' : ''}${s.isItalic ? 'italic ' : ''}${fontSize}px ${s.fontFamily || 'Arial'}`;
-                      const textMetrics = ctx.measureText(newContent);
-                      updated.width = textMetrics.width + (fontSize * 0.5);
+              // If updating content or formatting, recalculate width
+              if (prop === 'content' || prop === 'fontSize' || prop === 'dateFormat' || prop === 'fontFamily' || prop === 'isBold' || prop === 'isItalic') {
+                  
+                  // Handle Date Format specifically
+                  if (prop === 'dateFormat' && s.originalDateTimestamp) {
+                      updated.content = getFormattedDate(value, new Date(s.originalDateTimestamp));
                   }
-              }
 
-              // If updating text size via slider, re-calculate width to prevent clipping
-              if (prop === 'fontSize' && (s.type === SignatureType.TEXT || s.type === SignatureType.DATE || s.type === SignatureType.PLAINTEXT)) {
-                  const canvas = document.createElement('canvas');
-                  const ctx = canvas.getContext('2d');
-                  if (ctx) {
-                      const fontName = s.type === SignatureType.PLAINTEXT ? 'Helvetica, Arial' : (s.fontFamily || 'Arial');
-                      ctx.font = `${s.isBold ? 'bold ' : ''}${s.isItalic ? 'italic ' : ''}${value}px ${fontName}`;
-                      const textMetrics = ctx.measureText(s.content);
-                      updated.width = textMetrics.width + (value * 0.5);
-                      updated.height = value * 1.5; // Approx line height
+                  // Calculate new width
+                  const fontSize = updated.fontSize || (updated.type === SignatureType.PLAINTEXT ? 16 : 32);
+                  const font = getFont(updated);
+                  
+                  updated.width = calculateTextWidth(updated.content, fontSize, font, updated.isBold || false, updated.isItalic || false);
+                  
+                  if (prop === 'fontSize') {
+                      updated.height = fontSize * 1.5;
                   }
               }
 
@@ -775,6 +785,7 @@ function App() {
                                     cursor: isResizing ? 'default' : 'move'
                                 }}
                                 onMouseDown={(e) => handleMouseDown(e, sig.id)}
+                                onDoubleClick={(e) => { e.stopPropagation(); handleTextEdit(sig.id); }}
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     setSelectedSigId(sig.id);
@@ -896,6 +907,18 @@ function App() {
                     <h2 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest mb-4 mt-8">Properties</h2>
                     <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 space-y-4">
                         
+                         {/* Edit Text Content directly in sidebar */}
+                         {(selectedSig.type === SignatureType.TEXT || selectedSig.type === SignatureType.PLAINTEXT || selectedSig.type === SignatureType.DATE) && (
+                            <div>
+                                <label className="text-xs font-semibold text-slate-500 mb-1 block">Text Content</label>
+                                <textarea 
+                                    value={selectedSig.content}
+                                    onChange={(e) => updateSignatureProp(selectedSig.id, 'content', e.target.value)}
+                                    className="w-full p-2 rounded-lg border border-slate-200 text-sm focus:border-blue-500 outline-none resize-y min-h-[60px]"
+                                />
+                            </div>
+                         )}
+
                         {/* Date Format Selector */}
                         {selectedSig.type === SignatureType.DATE && (
                              <div>

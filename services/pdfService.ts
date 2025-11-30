@@ -122,13 +122,6 @@ export const generateSignedPDF = async (
              ctx.textBaseline = 'middle';
              ctx.fillText(sig.content, w / 2, h / 2);
 
-          } else if (sig.type === SignatureType.PLAINTEXT) {
-              const fontSize = sig.fontSize || 16;
-              ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${fontSize}px Helvetica, Arial, sans-serif`;
-              ctx.fillStyle = sig.color || '#000000';
-              ctx.textBaseline = 'middle'; 
-              ctx.fillText(sig.content, 0, h / 2);
-
           } else if (sig.type === SignatureType.SYMBOL) {
               const fontSize = sig.fontSize || 32;
               ctx.font = `bold ${fontSize}px sans-serif`;
@@ -138,13 +131,16 @@ export const generateSignedPDF = async (
               ctx.fillText(sig.content, w / 2, h / 2);
 
           } else {
-              // Signature / Date
-              const fontSize = sig.fontSize || 32;
-              const fontFamily = sig.fontFamily || 'sans-serif';
-              ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${fontSize}px "${fontFamily}"`;
+              // Signature / Date / PlainText
+              // IMPORTANT: Use the exact same logic as App.tsx to determine font
+              const fontSize = sig.fontSize || (sig.type === SignatureType.PLAINTEXT ? 16 : 32);
+              const fontFamily = sig.type === SignatureType.PLAINTEXT ? 'Helvetica, Arial, sans-serif' : (sig.fontFamily || 'sans-serif');
+              
+              ctx.font = `${sig.isBold ? 'bold ' : ''}${sig.isItalic ? 'italic ' : ''}${fontSize}px ${fontFamily.includes(' ') ? `"${fontFamily}"` : fontFamily}`;
               ctx.fillStyle = sig.color || '#000000';
               ctx.textBaseline = 'middle';
-              // Draw text
+              // Draw text - align left, middle
+              // We add a small padding (fontSize * 0.25) to match the visual center calculation
               ctx.fillText(sig.content, 0, h / 2);
           }
         }
