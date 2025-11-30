@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, FileText, ChevronLeft, ChevronRight, X, Download, MousePointer, Type, Image as ImageIcon, PenTool, Check, Trash2, Copy, Move, Maximize2, Palette, Bold, Italic, Loader2, ZoomIn, ZoomOut, RotateCw, Undo, Redo, Calendar, Stamp, FileCheck, RefreshCw, Eraser, Plus, ALargeSmall, AlertTriangle } from 'lucide-react';
+import { Upload, FileText, ChevronLeft, ChevronRight, X, Download, MousePointer, Type, Image as ImageIcon, PenTool, Check, Trash2, Copy, Move, Maximize2, Palette, Bold, Italic, Loader2, ZoomIn, ZoomOut, RotateCw, Undo, Redo, Calendar, Stamp, FileCheck, RefreshCw, Eraser, Plus, ALargeSmall, AlertTriangle, Book, Home } from 'lucide-react';
 import { UploadedFile, PDFPageInfo, SignatureItem, SignatureType, DocStats, SIGNATURE_FONTS, COLORS, STAMPS, DATE_FORMATS } from './types';
 import { loadPDF, generateSignedPDF } from './services/pdfService';
 import StatsChart from './components/StatsChart';
 import SignaturePad from './components/SignaturePad';
+import Documentation from './components/Documentation';
 
 function App() {
   // --- STATE ---
+  const [currentView, setCurrentView] = useState<'tool' | 'docs'>('tool');
   const [file, setFile] = useState<UploadedFile | null>(null);
   const [pages, setPages] = useState<PDFPageInfo[]>([]);
   const [stats, setStats] = useState<DocStats | null>(null);
@@ -111,6 +113,8 @@ function App() {
     setIsLoading(false);
     setProgress(0);
     setShowResetConfirm(false);
+    // Also ensure we are on tool view, or keep docs? Usually reset means go to upload.
+    setCurrentView('tool');
   };
 
   // Upload Handler
@@ -144,6 +148,7 @@ function App() {
             setPages(pdfPages);
             setStats(pdfStats);
             setIsLoading(false);
+            setCurrentView('tool'); // Switch to tool view on upload
         } catch (err) {
             console.error(err);
             alert("Error parsing PDF. Please try another file.");
@@ -410,7 +415,7 @@ function App() {
                     }
                 }
 
-                // --- SMART RESIZE LOGIC (FIXED) ---
+                // --- SMART RESIZE LOGIC ---
                 if (sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE || sig.type === SignatureType.PLAINTEXT) {
                     // 1. Calculate new Font Size based on Height ratio from START height
                     const heightRatio = newH / itemStartPos.h;
@@ -601,12 +606,37 @@ function App() {
     }
   };
 
-  // --- RENDER ---
+  // --- VIEW ROUTING ---
+  
+  // 1. Documentation View
+  if (currentView === 'docs') {
+      return <Documentation onBack={() => setCurrentView('tool')} isFileLoaded={!!file} />;
+  }
 
+  // 2. Landing Page (No File)
   if (!file) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-[2rem] shadow-xl p-8 md:p-12 max-w-2xl w-full text-center relative overflow-hidden border border-white/50">
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex flex-col items-center justify-center relative">
+        {/* Navigation Bar for Landing Page */}
+        <nav className="absolute top-0 left-0 w-full p-6 flex justify-between items-center z-10">
+            <div className="flex items-center gap-2">
+                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md">DS</div>
+                 <span className="font-bold text-lg text-slate-800">Digital Signature</span>
+            </div>
+            <div className="flex bg-white/50 backdrop-blur-sm p-1 rounded-xl shadow-sm border border-white/50">
+                 <button className="px-4 py-2 bg-white rounded-lg shadow-sm font-bold text-blue-600 text-sm flex items-center gap-2">
+                     <Home size={16} /> Home
+                 </button>
+                 <button 
+                    onClick={() => setCurrentView('docs')}
+                    className="px-4 py-2 text-slate-600 font-bold text-sm hover:text-blue-600 hover:bg-white/50 rounded-lg transition-all flex items-center gap-2"
+                 >
+                     <Book size={16} /> Documentation
+                 </button>
+            </div>
+        </nav>
+
+        <div className="bg-white rounded-[2rem] shadow-xl p-8 md:p-12 max-w-2xl w-full text-center relative overflow-hidden border border-white/50 animate-in zoom-in-95 duration-300">
           
           {isLoading && (
             <div className="absolute inset-0 bg-white/95 z-50 flex flex-col items-center justify-center backdrop-blur-sm">
@@ -640,12 +670,15 @@ function App() {
             />
           </label>
         </div>
+        
+        <p className="mt-8 text-slate-500 text-sm font-medium">100% Secure. Files are processed locally.</p>
       </div>
     );
   }
 
   const selectedSig = signatures.find(s => s.id === selectedSigId);
 
+  // 3. Main Tool View
   return (
     <div className="flex flex-col h-screen bg-slate-100 overflow-hidden">
       {/* --- HEADER --- */}
@@ -656,14 +689,20 @@ function App() {
                 <span className="font-bold text-lg text-slate-800 hidden md:inline truncate max-w-[200px]">{file.name}</span>
             </div>
             
-            {/* UPDATED: Upload Another Button - Calls handleReset which uses custom modal */}
-            <button 
-                onClick={handleReset}
-                className="flex items-center gap-2 px-3 py-2 md:px-4 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all cursor-pointer shadow-md hover:shadow-lg"
-            >
-                <Upload size={16} />
-                <span className="hidden sm:inline">Upload Another PDF</span>
-            </button>
+            {/* Main Navigation Tabs */}
+            <div className="hidden md:flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                <button 
+                    className="px-3 py-1 bg-white shadow-sm rounded-md text-sm font-bold text-blue-600 flex items-center gap-2"
+                >
+                    <PenTool size={14} /> Tool
+                </button>
+                <button 
+                    onClick={() => setCurrentView('docs')}
+                    className="px-3 py-1 text-sm font-medium text-slate-600 hover:text-blue-600 hover:bg-white/50 rounded-md transition-all flex items-center gap-2"
+                >
+                    <Book size={14} /> Docs
+                </button>
+            </div>
         </div>
         
         <div className="hidden md:flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200 shadow-inner">
@@ -676,6 +715,14 @@ function App() {
         </div>
 
         <div className="flex items-center gap-3">
+             <button 
+                onClick={handleReset}
+                className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-bold transition-all"
+                title="Start Over"
+            >
+                <Upload size={16} />
+                <span>New</span>
+            </button>
              <button 
                 onClick={handleDownload}
                 className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg hover:shadow-blue-200 active:scale-95"
@@ -753,13 +800,20 @@ function App() {
                 </div>
             </div>
 
-            <div className="mt-auto pt-4 border-t border-slate-100">
-                 <button 
+            <div className="mt-auto pt-4 border-t border-slate-100 space-y-2">
+                <button 
                     onClick={() => setFitToWidth(!fitToWidth)} 
                     className="flex items-center gap-3 w-full p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all text-sm font-medium"
                 >
                     <Maximize2 size={18} />
                     {fitToWidth ? 'Original Size' : 'Fit to Width'}
+                </button>
+                <button 
+                    onClick={() => setCurrentView('docs')} 
+                    className="flex items-center gap-3 w-full p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all text-sm font-medium md:hidden"
+                >
+                    <Book size={18} />
+                    Documentation
                 </button>
             </div>
         </div>
