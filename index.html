@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SignFlow Pro - Advanced PDF Signer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <!-- Google Fonts for Signatures (Wide variety for 50+ styles) -->
+    <link href="https://fonts.googleapis.com/css2?family=Aguafina+Script&family=Alex+Brush&family=Allura&family=Arizonia&family=Bad+Script&family=Bilbo+Swash+Caps&family=Birthstone&family=Bonheur+Royale&family=Calligraffitti&family=Cedarville+Cursive&family=Clicker+Script&family=Dancing+Script&family=Dawne&family=Euphoria+Script&family=Great+Vibes&family=Herr+Von+Muellerhoff&family=Homemade+Apple&family=Italianno&family=Jim+Nightshade&family=Kristi&family=La+Belle+Aurore&family=League+Script&family=Marck+Script&family=Meddon&family=Meie+Script&family=Monsieur+La+Doulaise&family=Mr+De+Haviland&family=Mrs+Saint+Delafield&family=Nothing+You+Could+Do&family=Over+the+Rainbow&family=Parisienne&family=Petit+Formal+Script&family=Pinyon+Script&family=Qwigley&family=Reenie+Beanie&family=Rochester&family=Rouge+Script&family=Sacramento&family=Seaweed+Script&family=Shadows+Into+Light&family=Tangerine&family=WindSong&family=Yellowtail&family=Zeyada&display=swap" rel="stylesheet">
+    <style>
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #f1f5f9; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1; 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8; 
+      }
+      .signature-font-preview {
+        font-size: 1.5rem;
+        line-height: 1.2;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "pdf-lib": "https://aistudiocdn.com/pdf-lib@^1.17.1",
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0"
+  }
+}
+</script>
+</head>
+  <body class="bg-slate-50 text-slate-900 antialiased overflow-hidden">
+    <div id="root"></div>
+  </body>
+</html>
