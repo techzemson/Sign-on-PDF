@@ -9,6 +9,8 @@ export enum SignatureType {
   DRAWING = 'DRAWING',
   TEXT = 'TEXT',
   IMAGE = 'IMAGE',
+  DATE = 'DATE',
+  STAMP = 'STAMP'
 }
 
 export interface SignatureItem {
@@ -20,6 +22,7 @@ export interface SignatureItem {
   width: number;
   height: number;
   pageIndex: number;
+  rotation?: number; // Degrees
   
   // Text specific
   fontFamily?: string;
@@ -27,6 +30,7 @@ export interface SignatureItem {
   isBold?: boolean;
   isItalic?: boolean;
   fontSize?: number;
+  opacity?: number;
 }
 
 export interface PDFPageInfo {
@@ -44,17 +48,26 @@ export interface DocStats {
 }
 
 export const SIGNATURE_FONTS = [
-  'Aguafina Script', 'Alex Brush', 'Allura', 'Arizonia', 'Bad Script', 
-  'Bilbo Swash Caps', 'Birthstone', 'Bonheur Royale', 'Calligraffitti', 
-  'Cedarville Cursive', 'Clicker Script', 'Dancing Script', 'Dawne', 
-  'Euphoria Script', 'Great Vibes', 'Herr Von Muellerhoff', 'Homemade Apple', 
-  'Italianno', 'Jim Nightshade', 'Kristi', 'La Belle Aurore', 'League Script', 
-  'Marck Script', 'Meddon', 'Meie Script', 'Monsieur La Doulaise', 
-  'Mr De Haviland', 'Mrs Saint Delafield', 'Nothing You Could Do', 
-  'Over the Rainbow', 'Parisienne', 'Petit Formal Script', 'Pinyon Script', 
-  'Qwigley', 'Reenie Beanie', 'Rochester', 'Rouge Script', 'Sacramento', 
-  'Seaweed Script', 'Shadows Into Light', 'Tangerine', 'WindSong', 
-  'Yellowtail', 'Zeyada'
+  'Aguafina Script', 'Alex Brush', 'Allura', 'Allison', 'Arizonia', 'Bad Script', 
+  'Bilbo Swash Caps', 'Birthstone', 'Birthstone Bounce', 'Bonheur Royale', 
+  'Calligraffitti', 'Caramel', 'Cedarville Cursive', 'Cherish', 'Clicker Script', 
+  'Comforter', 'Comforter Brush', 'Corinthia', 'Dancing Script', 'Dawne', 
+  'DynaPuff', 'Ephesis', 'Euphoria Script', 'Explora', 'Give You Glory', 
+  'Glories', 'Gloria Hallelujah', 'Gochi Hand', 'Grape Nuts', 'Great Vibes', 
+  'Grechen Fuemen', 'Grey Qo', 'Herr Von Muellerhoff', 'Homemade Apple', 
+  'Ingrid Darling', 'Italianno', 'Jim Nightshade', 'Just Me Again Down Here', 
+  'Kaushan Script', 'Kristi', 'La Belle Aurore', 'League Script', 'Licorice', 
+  'Loved by the King', 'Lovers Quarrel', 'Marck Script', 'Meddon', 'Meie Script', 
+  'Miss Fajardose', 'Monsieur La Doulaise', 'Moon Dance', 'Mr Bedfort', 
+  'Mr Dafoe', 'Mr De Haviland', 'Mrs Saint Delafield', 'Ms Madi', 'My Soul', 
+  'Nothing You Could Do', 'Oooh Baby', 'Over the Rainbow', 'Parisienne', 
+  'Passions Conflict', 'Petit Formal Script', 'Pinyon Script', 'Puppies Play', 
+  'Qwigley', 'Rancho', 'Redressed', 'Reenie Beanie', 'Rochester', 'Rock Salt', 
+  'Rouge Script', 'Ruthie', 'Sacramento', 'Satisfy', 'Schoolbell', 
+  'Seaweed Script', 'Sedgwick Ave', 'Shadows Into Light', 'Shadows Into Light Two', 
+  'Shalimar', 'Square Peg', 'Stalemate', 'Sue Ellen Francisco', 'Tangerine', 
+  'Taprom', 'Twinkle Star', 'Updock', 'Vibs', 'Water Brush', 'Whisper', 
+  'WindSong', 'Yellowtail', 'Yesteryear', 'Zeyada'
 ];
 
 export const COLORS = [
@@ -66,4 +79,15 @@ export const COLORS = [
   '#9a3412', // Orange
   '#0f172a', // Slate
   '#4a044e', // Fuchsia
+  '#ea580c', // Burnt Orange
+  '#0891b2', // Cyan
+  '#be185d', // Pink
+];
+
+export const STAMPS = [
+  { label: 'APPROVED', color: '#166534', borderColor: '#166534' },
+  { label: 'REJECTED', color: '#dc2626', borderColor: '#dc2626' },
+  { label: 'CONFIDENTIAL', color: '#9a3412', borderColor: '#9a3412' },
+  { label: 'DRAFT', color: '#64748b', borderColor: '#64748b' },
+  { label: 'COMPLETED', color: '#1e3a8a', borderColor: '#1e3a8a' },
 ];

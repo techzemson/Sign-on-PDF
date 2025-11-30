@@ -1,7 +1,6 @@
-import { PDFDocument, rgb, degrees } from 'pdf-lib';
+import { PDFDocument, rgb, degrees, StandardFonts } from 'pdf-lib';
 import { PDFPageInfo, SignatureItem, SignatureType, DocStats } from '../types';
 
-// We access the global window.pdfjsLib which is loaded via script tag
 declare global {
   interface Window {
     pdfjsLib: any;
@@ -19,7 +18,7 @@ export const loadPDF = async (fileData: ArrayBuffer): Promise<{ pages: PDFPageIn
     pageCount: numPages,
     fileSizeMB: parseFloat((fileData.byteLength / (1024 * 1024)).toFixed(2)),
     hasImages: true, // Simplified assumption
-    estimatedTextContent: 75, // Placeholder for chart
+    estimatedTextContent: 75,
   };
 
   for (let i = 1; i <= numPages; i++) {
@@ -56,10 +55,6 @@ export const generateSignedPDF = async (
 
   for (const sig of signatures) {
     const page = pages[sig.pageIndex];
-    // We need to map the screen coordinates back to PDF coordinates
-    // The screen (canvas) was rendered at scale 1.5 usually, or whatever the container width is
-    // However, we stored 'pageInfos' with the render dimensions.
-    
     const pageInfo = pageInfos[sig.pageIndex];
     const { width: pdfPageWidth, height: pdfPageHeight } = page.getSize();
     
@@ -68,43 +63,60 @@ export const generateSignedPDF = async (
     const scaleY = pdfPageHeight / pageInfo.height;
 
     const x = sig.x * scaleX;
-    // PDF coordinate system starts from bottom-left, but web is top-left
-    const y = pdfPageHeight - ((sig.y + sig.height) * scaleY) + (sig.height * scaleY) - (sig.height * scaleY); // Adjusted calculation
-    // Correct PDF Y: height - (y_from_top + element_height)
-    const correctedY = pdfPageHeight - (sig.y * scaleY) - (sig.height * scaleY);
+    // PDF coordinate system starts from bottom-left
+    // For rotated items, we might need adjustments, but pdf-lib handles rotation at center usually if specified
+    // Here we treat x,y as top-left of the element on screen
+    const y = pdfPageHeight - (sig.y * scaleY) - (sig.height * scaleY);
+    
+    const rotationAngle = degrees(sig.rotation || 0);
 
     if (sig.type === SignatureType.IMAGE || sig.type === SignatureType.DRAWING) {
       const pngImage = await pdfDoc.embedPng(sig.content);
       page.drawImage(pngImage, {
         x: x,
-        y: correctedY,
+        y: y,
         width: sig.width * scaleX,
         height: sig.height * scaleY,
+        rotate: rotationAngle,
+        opacity: sig.opacity ?? 1,
       });
-    } else if (sig.type === SignatureType.TEXT) {
-      // For text, we will convert the text element to an image using a hidden canvas
-      // This preserves the exact font look without embedding huge font files into the PDF
+    } else if (sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE || sig.type === SignatureType.STAMP) {
       const textCanvas = document.createElement('canvas');
-      // High resolution for text
       const scaleFactor = 3; 
       textCanvas.width = sig.width * scaleFactor;
       textCanvas.height = sig.height * scaleFactor;
       const ctx = textCanvas.getContext('2d');
       if (ctx) {
         ctx.scale(scaleFactor, scaleFactor);
-        ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${sig.fontSize || 32}px "${sig.fontFamily}"`;
-        ctx.fillStyle = sig.color || '#000000';
-        ctx.textBaseline = 'top';
-        ctx.fillText(sig.content, 0, 0, sig.width); // Allow max width
+        
+        if (sig.type === SignatureType.STAMP) {
+           // Draw border
+           ctx.strokeStyle = sig.color || '#000';
+           ctx.lineWidth = 4;
+           ctx.strokeRect(4, 4, sig.width - 8, sig.height - 8);
+           ctx.font = `bold ${sig.fontSize || 32}px sans-serif`;
+           ctx.fillStyle = sig.color || '#000';
+           ctx.textAlign = 'center';
+           ctx.textBaseline = 'middle';
+           ctx.fillText(sig.content, sig.width / 2, sig.height / 2);
+        } else {
+            ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${sig.fontSize || 32}px "${sig.fontFamily || 'sans-serif'}"`;
+            ctx.fillStyle = sig.color || '#000000';
+            ctx.textBaseline = 'top';
+            // Handle multi-line if needed, but for signature usually single line
+            ctx.fillText(sig.content, 0, 0, sig.width);
+        }
       }
       
       const textImgData = textCanvas.toDataURL('image/png');
       const pngImage = await pdfDoc.embedPng(textImgData);
        page.drawImage(pngImage, {
         x: x,
-        y: correctedY,
+        y: y,
         width: sig.width * scaleX,
         height: sig.height * scaleY,
+        rotate: rotationAngle,
+        opacity: sig.opacity ?? 1,
       });
     }
   }
