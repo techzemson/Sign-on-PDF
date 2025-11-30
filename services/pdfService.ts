@@ -8,7 +8,13 @@ declare global {
 }
 
 export const loadPDF = async (fileData: ArrayBuffer): Promise<{ pages: PDFPageInfo[], stats: DocStats }> => {
-  const loadingTask = window.pdfjsLib.getDocument({ data: fileData });
+  // CRITICAL FIX: Create a copy of the buffer. 
+  // PDF.js (especially with workers) often transfers ownership of the ArrayBuffer, 
+  // causing the original 'fileData' to become detached. 
+  // We need the original 'fileData' to remain valid for the final PDF generation/download.
+  const dataCopy = fileData.slice(0);
+
+  const loadingTask = window.pdfjsLib.getDocument({ data: dataCopy });
   const pdf = await loadingTask.promise;
   const numPages = pdf.numPages;
   const pages: PDFPageInfo[] = [];
@@ -51,6 +57,11 @@ export const generateSignedPDF = async (
   pageInfos: PDFPageInfo[]
 ): Promise<Uint8Array> => {
   try {
+    // Check if buffer is detached before trying to load
+    if (originalPdfBytes.byteLength === 0) {
+        throw new Error("PDF Buffer is empty or detached. Please reload the file.");
+    }
+
     const pdfDoc = await PDFDocument.load(originalPdfBytes);
     const pages = pdfDoc.getPages();
 
@@ -62,7 +73,6 @@ export const generateSignedPDF = async (
       const { width: pdfPageWidth, height: pdfPageHeight } = page.getSize();
       
       // Scale factors (Canvas Viewport -> PDF Point)
-      // pageInfo.width/height are the dimensions of the viewport used to render on screen (at scale 1.5 usually)
       const scaleX = pdfPageWidth / pageInfo.width;
       const scaleY = pdfPageHeight / pageInfo.height;
 
@@ -73,9 +83,6 @@ export const generateSignedPDF = async (
       
       const rotationAngle = degrees(sig.rotation || 0);
 
-      // We use a temporary canvas to render all text/stamps to ensure they look exactly like on screen
-      // then embed as PNG. This avoids font embedding issues in PDF files.
-      
       let imgBytes: string | Uint8Array | null = null;
 
       if (sig.type === SignatureType.IMAGE || sig.type === SignatureType.DRAWING) {
@@ -84,25 +91,28 @@ export const generateSignedPDF = async (
         // Render text/stamp to high-res canvas
         const textCanvas = document.createElement('canvas');
         
-        // Use a higher render scale for crispness, but we must be careful with alignment
+        // Use a higher render scale for crispness
         const renderScale = 3; 
         
-        // The canvas size should match the signature box size multiplied by renderScale
-        textCanvas.width = sig.width * renderScale;
-        textCanvas.height = sig.height * renderScale;
+        // Ensure minimum dimensions to prevent 0-size canvas error
+        const w = Math.max(sig.width, 10);
+        const h = Math.max(sig.height, 10);
+        
+        textCanvas.width = w * renderScale;
+        textCanvas.height = h * renderScale;
         
         const ctx = textCanvas.getContext('2d');
         if (ctx) {
           ctx.scale(renderScale, renderScale);
           
           // Clear background (transparent)
-          ctx.clearRect(0, 0, sig.width, sig.height);
+          ctx.clearRect(0, 0, w, h);
 
           if (sig.type === SignatureType.STAMP) {
              // Draw border
              ctx.strokeStyle = sig.color || '#000';
              ctx.lineWidth = 4;
-             ctx.strokeRect(2, 2, sig.width - 4, sig.height - 4);
+             ctx.strokeRect(2, 2, w - 4, h - 4);
              
              // Auto-fit text for stamp
              const fontSize = sig.fontSize || 24;
@@ -110,14 +120,14 @@ export const generateSignedPDF = async (
              ctx.fillStyle = sig.color || '#000';
              ctx.textAlign = 'center';
              ctx.textBaseline = 'middle';
-             ctx.fillText(sig.content, sig.width / 2, sig.height / 2);
+             ctx.fillText(sig.content, w / 2, h / 2);
 
           } else if (sig.type === SignatureType.PLAINTEXT) {
               const fontSize = sig.fontSize || 16;
               ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${fontSize}px Helvetica, Arial, sans-serif`;
               ctx.fillStyle = sig.color || '#000000';
               ctx.textBaseline = 'middle'; 
-              ctx.fillText(sig.content, 0, sig.height / 2);
+              ctx.fillText(sig.content, 0, h / 2);
 
           } else if (sig.type === SignatureType.SYMBOL) {
               const fontSize = sig.fontSize || 32;
@@ -125,18 +135,17 @@ export const generateSignedPDF = async (
               ctx.fillStyle = sig.color || '#000000';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
-              ctx.fillText(sig.content, sig.width / 2, sig.height / 2);
+              ctx.fillText(sig.content, w / 2, h / 2);
 
           } else {
               // Signature / Date
-              // IMPORTANT: Use the exact font family or fallback
               const fontSize = sig.fontSize || 32;
               const fontFamily = sig.fontFamily || 'sans-serif';
               ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${fontSize}px "${fontFamily}"`;
               ctx.fillStyle = sig.color || '#000000';
               ctx.textBaseline = 'middle';
-              // Draw text. Since we auto-adjust width in App.tsx, we can just draw at 0, y-center.
-              ctx.fillText(sig.content, 0, sig.height / 2);
+              // Draw text
+              ctx.fillText(sig.content, 0, h / 2);
           }
         }
         imgBytes = textCanvas.toDataURL('image/png');

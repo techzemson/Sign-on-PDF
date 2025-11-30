@@ -34,7 +34,10 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 });
-  const [itemStartPos, setItemStartPos] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  
+  // FIXED: Added fontSize to start pos tracking to prevent exponential growth during resize
+  const [itemStartPos, setItemStartPos] = useState({ x: 0, y: 0, w: 0, h: 0, fontSize: 0 });
+  
   const [resizeCorner, setResizeCorner] = useState<string | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
@@ -80,6 +83,24 @@ function App() {
       setHistoryIndex(prev => prev + 1);
       setSignatures(history[historyIndex + 1]);
     }
+  };
+
+  // Reset/Home Handler
+  const handleReset = () => {
+    if (signatures.length > 0 && !confirm("Are you sure? Unsaved changes will be lost.")) {
+      return;
+    }
+    setFile(null);
+    setPages([]);
+    setStats(null);
+    setSignatures([]);
+    setHistory([]);
+    setHistoryIndex(-1);
+    setPlacingItem(null);
+    setSelectedSigId(null);
+    setZoom(1);
+    setIsLoading(false);
+    setProgress(0);
   };
 
   // Upload Handler
@@ -288,7 +309,13 @@ function App() {
     
     const sig = signatures.find(s => s.id === id);
     if (sig) {
-        setItemStartPos({ x: sig.x, y: sig.y, w: sig.width, h: sig.height });
+        setItemStartPos({ 
+          x: sig.x, 
+          y: sig.y, 
+          w: sig.width, 
+          h: sig.height,
+          fontSize: sig.fontSize || 32 
+        });
     }
   };
 
@@ -301,7 +328,13 @@ function App() {
       setDragStartPos({ x: e.clientX, y: e.clientY });
       const sig = signatures.find(s => s.id === id);
       if (sig) {
-          setItemStartPos({ x: sig.x, y: sig.y, w: sig.width, h: sig.height });
+          setItemStartPos({ 
+            x: sig.x, 
+            y: sig.y, 
+            w: sig.width, 
+            h: sig.height,
+            fontSize: sig.fontSize || 32
+          });
       }
   };
 
@@ -356,14 +389,13 @@ function App() {
                     }
                 }
 
-                // --- SMART RESIZE LOGIC ---
-                // For Text/Date/SignatureText: Height dictates Font Size. Width auto-adjusts to fit content.
-                // This prevents clipping.
+                // --- SMART RESIZE LOGIC (FIXED) ---
+                // We now use itemStartPos.fontSize as the anchor to prevent exponential compounding errors.
                 if (sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE || sig.type === SignatureType.PLAINTEXT) {
-                    // 1. Calculate new Font Size based on Height change
+                    // 1. Calculate new Font Size based on Height ratio from START height
                     const heightRatio = newH / itemStartPos.h;
-                    const oldFontSize = sig.fontSize || 32;
-                    let newFontSize = oldFontSize * heightRatio;
+                    const baseFontSize = itemStartPos.fontSize; // Anchor to start size
+                    let newFontSize = baseFontSize * heightRatio;
                     
                     // Clamps
                     newFontSize = Math.max(8, Math.min(newFontSize, 300));
@@ -380,16 +412,7 @@ function App() {
                     }
 
                     // 3. Update Dimensions
-                    // If resizing from left, we need to adjust X to keep right side anchored (conceptually)
-                    // but usually users just want the text to grow. 
-                    // Let's just update width and let it expand to right, unless it was a 'w' resize.
                     if (resizeCorner.includes('w')) {
-                         // If expanding left, we need to shift X by the difference in width
-                         const widthDiff = newW - itemStartPos.w; // can be pos or neg
-                         // Wait, complicated. Simple approach: Center anchor or Top-Left anchor?
-                         // Current logic uses Top-Left anchor for X. 
-                         // If I drag Left Handle, I expect the Right side to stay put.
-                         // But since we are forcing Width, let's just update X if it was a west-side drag.
                          newX = itemStartPos.x + (itemStartPos.w - newW);
                     }
 
@@ -402,9 +425,6 @@ function App() {
                         fontSize: newFontSize
                     };
                 } else {
-                    // For Images/Drawings/Stamps/Symbols: Maintain Aspect Ratio if corner dragged?
-                    // Or free resize. Let's do free resize but maybe Aspect Ratio lock is better for signatures.
-                    // Let's standard free resize for now, user can shape it.
                     return {
                         ...sig,
                         x: newX,
@@ -490,10 +510,23 @@ function App() {
       setSignatures(prev => prev.map(s => {
           if (s.id === id) {
               const updated = { ...s, [prop]: value };
-              // If updating format, re-generate content immediately
+              
+              // If updating format, re-generate content immediately AND recalculate width
               if (prop === 'dateFormat' && s.originalDateTimestamp) {
-                  updated.content = getFormattedDate(value, new Date(s.originalDateTimestamp));
+                  const newContent = getFormattedDate(value, new Date(s.originalDateTimestamp));
+                  updated.content = newContent;
+
+                  // Auto-resize width for the new date string to prevent clipping
+                  const canvas = document.createElement('canvas');
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                      const fontSize = s.fontSize || 24;
+                      ctx.font = `${s.isBold ? 'bold ' : ''}${s.isItalic ? 'italic ' : ''}${fontSize}px ${s.fontFamily || 'Arial'}`;
+                      const textMetrics = ctx.measureText(newContent);
+                      updated.width = textMetrics.width + (fontSize * 0.5);
+                  }
               }
+
               // If updating text size via slider, re-calculate width to prevent clipping
               if (prop === 'fontSize' && (s.type === SignatureType.TEXT || s.type === SignatureType.DATE || s.type === SignatureType.PLAINTEXT)) {
                   const canvas = document.createElement('canvas');
@@ -595,19 +628,14 @@ function App() {
                 <span className="font-bold text-lg text-slate-800 hidden md:inline truncate max-w-[200px]">{file.name}</span>
             </div>
             
-            {/* UPDATED: Blue CTA for New File */}
-            <label className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all cursor-pointer shadow-md hover:shadow-lg">
+            {/* UPDATED: Blue CTA for Reset/Upload Another */}
+            <button 
+                onClick={handleReset}
+                className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all cursor-pointer shadow-md hover:shadow-lg"
+            >
                 <Upload size={16} />
                 <span>Upload Another PDF</span>
-                <input 
-                  type="file" 
-                  accept="application/pdf" 
-                  className="hidden" 
-                  onChange={(e) => {
-                      if(confirm("Replace current file?")) handleFileUpload(e);
-                  }}
-                />
-            </label>
+            </button>
         </div>
         
         <div className="hidden md:flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200 shadow-inner">
@@ -808,7 +836,22 @@ function App() {
 
                                     {/* Edit Controls */}
                                     {selectedSigId === sig.id && !isResizing && !isDragging && (
-                                        <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-800 text-white rounded-lg flex items-center p-1.5 shadow-xl gap-2 z-50 pointer-events-auto">
+                                        <div className="absolute -top-14 left-1/2 -translate-x-1/2 bg-slate-800 text-white rounded-lg flex items-center p-1.5 shadow-xl gap-2 z-50 pointer-events-auto">
+                                             {/* Date Format Helper in Floating Toolbar */}
+                                             {sig.type === SignatureType.DATE && (
+                                                <>
+                                                    <select 
+                                                        value={sig.dateFormat || 'MM/DD/YYYY'} 
+                                                        onChange={(e) => updateSignatureProp(sig.id, 'dateFormat', e.target.value)}
+                                                        className="bg-slate-700 text-white text-xs p-1 rounded border-none outline-none mr-2 max-w-[100px]"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    >
+                                                        {DATE_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
+                                                    </select>
+                                                    <div className="w-px h-3 bg-slate-600"></div>
+                                                </>
+                                            )}
+
                                             <button 
                                                 onClick={(e) => { e.stopPropagation(); updateSignatureProp(sig.id, 'rotation', (sig.rotation || 0) - 90) }} 
                                                 className="p-1 hover:bg-slate-700 rounded text-slate-300 hover:text-white" title="Rotate"
