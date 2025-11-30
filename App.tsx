@@ -628,13 +628,13 @@ function App() {
                 <span className="font-bold text-lg text-slate-800 hidden md:inline truncate max-w-[200px]">{file.name}</span>
             </div>
             
-            {/* UPDATED: Blue CTA for Reset/Upload Another */}
+            {/* UPDATED: Upload Another Button - Visible on all devices */}
             <button 
                 onClick={handleReset}
-                className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all cursor-pointer shadow-md hover:shadow-lg"
+                className="flex items-center gap-2 px-3 py-2 md:px-4 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all cursor-pointer shadow-md hover:shadow-lg"
             >
                 <Upload size={16} />
-                <span>Upload Another PDF</span>
+                <span className="hidden sm:inline">Upload Another PDF</span>
             </button>
         </div>
         
@@ -662,7 +662,7 @@ function App() {
       <div className="flex flex-1 overflow-hidden relative">
         
         {/* LEFT SIDEBAR */}
-        <div className="w-64 bg-white border-r border-slate-200 flex flex-col p-4 gap-4 z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)] overflow-y-auto">
+        <div className="w-64 bg-white border-r border-slate-200 flex flex-col p-4 gap-4 z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)] overflow-y-auto hidden md:flex">
             
             <div className="space-y-3">
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">Essentials</p>
@@ -845,6 +845,8 @@ function App() {
                                                         onChange={(e) => updateSignatureProp(sig.id, 'dateFormat', e.target.value)}
                                                         className="bg-slate-700 text-white text-xs p-1 rounded border-none outline-none mr-2 max-w-[100px]"
                                                         onClick={(e) => e.stopPropagation()}
+                                                        onMouseDown={(e) => e.stopPropagation()}
+                                                        onPointerDown={(e) => e.stopPropagation()}
                                                     >
                                                         {DATE_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
                                                     </select>
@@ -954,12 +956,20 @@ function App() {
         </div>
       </div>
 
-      <button 
-        onClick={() => setShowSigModal(true)}
-        className="md:hidden absolute bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:bg-blue-700 hover:scale-110 transition-all z-50"
-      >
-        <PenTool size={24} />
-      </button>
+      <div className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 flex gap-4 z-50">
+        <button 
+          onClick={() => setShowSigModal(true)}
+          className="w-14 h-14 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:bg-blue-700 hover:scale-110 transition-all"
+        >
+          <PenTool size={24} />
+        </button>
+        <button 
+          onClick={() => handleQuickAction('date')}
+          className="w-14 h-14 bg-white text-blue-600 border border-slate-200 rounded-full shadow-2xl flex items-center justify-center hover:bg-slate-50 transition-all"
+        >
+          <Calendar size={24} />
+        </button>
+      </div>
 
       {/* --- GHOST CURSOR --- */}
       {placingItem && (
