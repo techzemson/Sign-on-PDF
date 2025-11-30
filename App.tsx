@@ -223,6 +223,17 @@ function App() {
     const x = (e.clientX - rect.left) / zoom;
     const y = (e.clientY - rect.top) / zoom;
 
+    // Helper to measure text width approximately to set initial width
+    const measureText = (text: string, fontSize: number, font: string) => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+            ctx.font = `${fontSize}px ${font}`;
+            return ctx.measureText(text).width + 20; // + padding
+        }
+        return 200;
+    };
+
     // Default dimensions based on type
     let width = 200;
     let height = 60;
@@ -231,11 +242,17 @@ function App() {
         width = 150; 
         height = 60;
     } else if (placingItem.type === SignatureType.SYMBOL) {
-        width = 40;
-        height = 40;
+        width = 50;
+        height = 50;
     } else if (placingItem.type === SignatureType.PLAINTEXT) {
-        width = 150;
-        height = 30;
+        height = placingItem.style.fontSize * 1.5;
+        width = measureText(placingItem.content, placingItem.style.fontSize, placingItem.style.fontFamily);
+    } else if (placingItem.type === SignatureType.DATE) {
+        height = placingItem.style.fontSize * 1.5;
+        width = measureText(placingItem.content, placingItem.style.fontSize, placingItem.style.fontFamily);
+    } else if (placingItem.type === SignatureType.TEXT) {
+         height = placingItem.style.fontSize * 1.5;
+         width = measureText(placingItem.content, placingItem.style.fontSize, placingItem.style.fontFamily);
     } else if (placingItem.type === SignatureType.DRAWING || placingItem.type === SignatureType.IMAGE) {
         width = 150;
         height = 80;
@@ -316,66 +333,86 @@ function App() {
         
         setSignatures(prev => prev.map(sig => {
             if (sig.id === selectedSigId) {
+                // Calculate new dimensions first
                 let newW = itemStartPos.w;
                 let newH = itemStartPos.h;
                 let newX = itemStartPos.x;
                 let newY = itemStartPos.y;
 
-                // Aspect ratio preservation for most items, maybe strictly for images
-                // For simplicity, we allow free resizing but we can implement scaling for text
-                
-                if (resizeCorner === 'se') { // Bottom-Right
-                    newW = Math.max(20, itemStartPos.w + dx);
-                    newH = Math.max(20, itemStartPos.h + dy);
-                } else if (resizeCorner === 'sw') { // Bottom-Left
-                    newW = Math.max(20, itemStartPos.w - dx);
-                    newH = Math.max(20, itemStartPos.h + dy);
-                    newX = itemStartPos.x + (itemStartPos.w - newW);
-                } else if (resizeCorner === 'ne') { // Top-Right
-                    newW = Math.max(20, itemStartPos.w + dx);
-                    newH = Math.max(20, itemStartPos.h - dy);
-                    newY = itemStartPos.y + (itemStartPos.h - newH);
-                } else if (resizeCorner === 'nw') { // Top-Left
-                    newW = Math.max(20, itemStartPos.w - dx);
-                    newH = Math.max(20, itemStartPos.h - dy);
-                    newX = itemStartPos.x + (itemStartPos.w - newW);
-                    newY = itemStartPos.y + (itemStartPos.h - newH);
+                if (resizeCorner.includes('e')) newW = Math.max(20, itemStartPos.w + dx);
+                if (resizeCorner.includes('w')) {
+                    const possibleW = itemStartPos.w - dx;
+                    if (possibleW > 20) {
+                        newW = possibleW;
+                        newX = itemStartPos.x + dx;
+                    }
+                }
+                if (resizeCorner.includes('s')) newH = Math.max(20, itemStartPos.h + dy);
+                if (resizeCorner.includes('n')) {
+                    const possibleH = itemStartPos.h - dy;
+                    if (possibleH > 20) {
+                        newH = possibleH;
+                        newY = itemStartPos.y + dy;
+                    }
                 }
 
-                // Update font size proportionally if it's text
-                let newFontSize = sig.fontSize;
-                if (sig.type !== SignatureType.IMAGE && sig.type !== SignatureType.DRAWING) {
-                    // Simple logic: Scale font size by height change ratio
-                    const ratio = newH / itemStartPos.h;
-                    // Base current font size or default
-                    newFontSize = (sig.fontSize || 32) * ratio;
-                    // Dampen crazy resizing
-                    if (newFontSize < 8) newFontSize = 8;
-                    if (newFontSize > 200) newFontSize = 200;
+                // --- SMART RESIZE LOGIC ---
+                // For Text/Date/SignatureText: Height dictates Font Size. Width auto-adjusts to fit content.
+                // This prevents clipping.
+                if (sig.type === SignatureType.TEXT || sig.type === SignatureType.DATE || sig.type === SignatureType.PLAINTEXT) {
+                    // 1. Calculate new Font Size based on Height change
+                    const heightRatio = newH / itemStartPos.h;
+                    const oldFontSize = sig.fontSize || 32;
+                    let newFontSize = oldFontSize * heightRatio;
                     
-                    // Note: This updates fontSize constantly. 
-                    // To be smoother, we might want to base it off initial fontSize * totalRatio.
-                    // But here we're updating state every frame, so 'sig.fontSize' is current.
-                    // The ratio calculation above is wrong because itemStartPos is static but sig.fontSize changes? 
-                    // No, itemStartPos is snapshot at start of drag.
-                    // But we need the INITIAL font size at start of drag to scale correctly.
-                    // Let's assume we didn't store initial font size in itemStartPos. 
-                    // Let's just update font size based on height.
-                    // Actually, let's keep it simple: newH determines font size mostly.
-                    newFontSize = (newH / itemStartPos.h) * (sig.fontSize || 32);
-                    // Wait, if I drag, itemStartPos is constant. sig.fontSize in state is NOT updated in itemStartPos.
-                    // So we must rely on the signature in the state... wait. 
-                    // Correct: itemStartPos captures the state at MOUSE DOWN. So 'sig' inside handleResizeStart closure.
-                    // We need to store originalFontSize in itemStartPos.
-                }
+                    // Clamps
+                    newFontSize = Math.max(8, Math.min(newFontSize, 300));
 
-                return {
-                    ...sig,
-                    x: newX,
-                    y: newY,
-                    width: newW,
-                    height: newH,
-                };
+                    // 2. Measure required width for this new font size
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        const fontName = sig.type === SignatureType.PLAINTEXT ? 'Helvetica, Arial' : (sig.fontFamily || 'Arial');
+                        ctx.font = `${sig.isBold ? 'bold ' : ''}${sig.isItalic ? 'italic ' : ''}${newFontSize}px ${fontName}`;
+                        const textMetrics = ctx.measureText(sig.content);
+                        // Add some padding to prevent edge clipping
+                        newW = textMetrics.width + (newFontSize * 0.5); 
+                    }
+
+                    // 3. Update Dimensions
+                    // If resizing from left, we need to adjust X to keep right side anchored (conceptually)
+                    // but usually users just want the text to grow. 
+                    // Let's just update width and let it expand to right, unless it was a 'w' resize.
+                    if (resizeCorner.includes('w')) {
+                         // If expanding left, we need to shift X by the difference in width
+                         const widthDiff = newW - itemStartPos.w; // can be pos or neg
+                         // Wait, complicated. Simple approach: Center anchor or Top-Left anchor?
+                         // Current logic uses Top-Left anchor for X. 
+                         // If I drag Left Handle, I expect the Right side to stay put.
+                         // But since we are forcing Width, let's just update X if it was a west-side drag.
+                         newX = itemStartPos.x + (itemStartPos.w - newW);
+                    }
+
+                    return {
+                        ...sig,
+                        x: newX,
+                        y: newY,
+                        width: newW,
+                        height: newH,
+                        fontSize: newFontSize
+                    };
+                } else {
+                    // For Images/Drawings/Stamps/Symbols: Maintain Aspect Ratio if corner dragged?
+                    // Or free resize. Let's do free resize but maybe Aspect Ratio lock is better for signatures.
+                    // Let's standard free resize for now, user can shape it.
+                    return {
+                        ...sig,
+                        x: newX,
+                        y: newY,
+                        width: newW,
+                        height: newH,
+                    };
+                }
             }
             return sig;
         }));
@@ -453,10 +490,23 @@ function App() {
       setSignatures(prev => prev.map(s => {
           if (s.id === id) {
               const updated = { ...s, [prop]: value };
-              // If updating format, re-generate content
+              // If updating format, re-generate content immediately
               if (prop === 'dateFormat' && s.originalDateTimestamp) {
                   updated.content = getFormattedDate(value, new Date(s.originalDateTimestamp));
               }
+              // If updating text size via slider, re-calculate width to prevent clipping
+              if (prop === 'fontSize' && (s.type === SignatureType.TEXT || s.type === SignatureType.DATE || s.type === SignatureType.PLAINTEXT)) {
+                  const canvas = document.createElement('canvas');
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                      const fontName = s.type === SignatureType.PLAINTEXT ? 'Helvetica, Arial' : (s.fontFamily || 'Arial');
+                      ctx.font = `${s.isBold ? 'bold ' : ''}${s.isItalic ? 'italic ' : ''}${value}px ${fontName}`;
+                      const textMetrics = ctx.measureText(s.content);
+                      updated.width = textMetrics.width + (value * 0.5);
+                      updated.height = value * 1.5; // Approx line height
+                  }
+              }
+
               return updated;
           }
           return s;
@@ -466,8 +516,12 @@ function App() {
   const handleDownload = async () => {
     if (!file) return;
     setIsLoading(true);
-    setProgress(50);
+    setProgress(10);
     try {
+        // Yield to UI to show loading
+        await new Promise(resolve => setTimeout(resolve, 100));
+        setProgress(30);
+        
         const pdfBytes = await generateSignedPDF(file.data, signatures, pages);
         setProgress(100);
         
@@ -479,8 +533,8 @@ function App() {
         link.click();
         document.body.removeChild(link);
     } catch (e) {
-        console.error(e);
-        alert("Error generating PDF");
+        console.error("Download error", e);
+        alert("Error generating PDF. Please check console.");
     } finally {
         setIsLoading(false);
     }
@@ -541,9 +595,10 @@ function App() {
                 <span className="font-bold text-lg text-slate-800 hidden md:inline truncate max-w-[200px]">{file.name}</span>
             </div>
             
-            <label className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-100 bg-blue-50 text-blue-600 text-xs font-bold hover:bg-blue-100 transition-colors cursor-pointer">
-                <Upload size={14} />
-                <span>New File</span>
+            {/* UPDATED: Blue CTA for New File */}
+            <label className="hidden md:flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition-all cursor-pointer shadow-md hover:shadow-lg">
+                <Upload size={16} />
+                <span>Upload Another PDF</span>
                 <input 
                   type="file" 
                   accept="application/pdf" 
@@ -565,7 +620,6 @@ function App() {
         </div>
 
         <div className="flex items-center gap-3">
-             {/* UPDATED: Blue Download Button */}
              <button 
                 onClick={handleDownload}
                 className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg hover:shadow-blue-200 active:scale-95"
@@ -719,9 +773,6 @@ function App() {
                                                 color: sig.color,
                                                 fontWeight: sig.isBold ? 'bold' : 'normal',
                                                 fontStyle: sig.isItalic ? 'italic' : 'normal',
-                                                // Calculate font size relative to current height vs original/base height logic?
-                                                // Actually we can just rely on the fontSize state which we update during resize.
-                                                // But we need to scale it by zoom for display.
                                                 fontSize: `${(sig.fontSize || 32) * zoom}px`
                                             }}
                                         >
@@ -806,8 +857,10 @@ function App() {
                                 <label className="text-xs font-semibold text-slate-500 mb-1 block">Date Format</label>
                                 <select 
                                     value={selectedSig.dateFormat || 'MM/DD/YYYY'} 
-                                    onChange={(e) => updateSignatureProp(selectedSig.id, 'dateFormat', e.target.value)}
-                                    className="w-full p-2 rounded-lg border border-slate-200 text-sm"
+                                    onChange={(e) => {
+                                        updateSignatureProp(selectedSig.id, 'dateFormat', e.target.value);
+                                    }}
+                                    className="w-full p-2 rounded-lg border border-slate-200 text-sm focus:border-blue-500 outline-none"
                                 >
                                     {DATE_FORMATS.map(f => <option key={f} value={f}>{f}</option>)}
                                 </select>
@@ -841,7 +894,7 @@ function App() {
                          
                          {/* Manual Size slider for non-mouse users */}
                         <div>
-                            <label className="text-xs font-semibold text-slate-500 mb-1 block">Text Size</label>
+                            <label className="text-xs font-semibold text-slate-500 mb-1 block">Size</label>
                             <input 
                                 type="range" 
                                 min="10" 

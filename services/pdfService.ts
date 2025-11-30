@@ -63,16 +63,12 @@ export const generateSignedPDF = async (
       
       // Scale factors (Canvas Viewport -> PDF Point)
       // pageInfo.width/height are the dimensions of the viewport used to render on screen (at scale 1.5 usually)
-      // pdfPageWidth/Height are the actual PDF point dimensions.
-      // We stored sig.x/y based on the *rendered* size at zoom level.
-      // WAIT: in App.tsx, we divide by `zoom` when storing sig.x/y/width/height.
-      // So sig.x is relative to page.width (which comes from pageInfo.width).
-      
       const scaleX = pdfPageWidth / pageInfo.width;
       const scaleY = pdfPageHeight / pageInfo.height;
 
       const x = sig.x * scaleX;
       // PDF coordinate system starts from bottom-left
+      // sig.y is top-left based.
       const y = pdfPageHeight - (sig.y * scaleY) - (sig.height * scaleY);
       
       const rotationAngle = degrees(sig.rotation || 0);
@@ -81,14 +77,17 @@ export const generateSignedPDF = async (
       // then embed as PNG. This avoids font embedding issues in PDF files.
       
       let imgBytes: string | Uint8Array | null = null;
-      let isPng = true;
 
       if (sig.type === SignatureType.IMAGE || sig.type === SignatureType.DRAWING) {
         imgBytes = sig.content;
       } else {
         // Render text/stamp to high-res canvas
         const textCanvas = document.createElement('canvas');
-        const renderScale = 3; // High resolution multiplier
+        
+        // Use a higher render scale for crispness, but we must be careful with alignment
+        const renderScale = 3; 
+        
+        // The canvas size should match the signature box size multiplied by renderScale
         textCanvas.width = sig.width * renderScale;
         textCanvas.height = sig.height * renderScale;
         
@@ -102,7 +101,7 @@ export const generateSignedPDF = async (
           if (sig.type === SignatureType.STAMP) {
              // Draw border
              ctx.strokeStyle = sig.color || '#000';
-             ctx.lineWidth = 4; // Relative to unscaled coord
+             ctx.lineWidth = 4;
              ctx.strokeRect(2, 2, sig.width - 4, sig.height - 4);
              
              // Auto-fit text for stamp
@@ -112,13 +111,14 @@ export const generateSignedPDF = async (
              ctx.textAlign = 'center';
              ctx.textBaseline = 'middle';
              ctx.fillText(sig.content, sig.width / 2, sig.height / 2);
+
           } else if (sig.type === SignatureType.PLAINTEXT) {
               const fontSize = sig.fontSize || 16;
               ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${fontSize}px Helvetica, Arial, sans-serif`;
               ctx.fillStyle = sig.color || '#000000';
-              ctx.textBaseline = 'top';
-              // Simple text wrapping or clipping? Simple text for now.
-              ctx.fillText(sig.content, 0, 0);
+              ctx.textBaseline = 'middle'; 
+              ctx.fillText(sig.content, 0, sig.height / 2);
+
           } else if (sig.type === SignatureType.SYMBOL) {
               const fontSize = sig.fontSize || 32;
               ctx.font = `bold ${fontSize}px sans-serif`;
@@ -126,15 +126,16 @@ export const generateSignedPDF = async (
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
               ctx.fillText(sig.content, sig.width / 2, sig.height / 2);
+
           } else {
               // Signature / Date
+              // IMPORTANT: Use the exact font family or fallback
               const fontSize = sig.fontSize || 32;
-              // Ensure font is loaded, otherwise it might fallback. 
-              // Since it's client side, the font should be available in the browser cache.
-              ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${fontSize}px "${sig.fontFamily || 'sans-serif'}"`;
+              const fontFamily = sig.fontFamily || 'sans-serif';
+              ctx.font = `${sig.isItalic ? 'italic' : ''} ${sig.isBold ? 'bold' : ''} ${fontSize}px "${fontFamily}"`;
               ctx.fillStyle = sig.color || '#000000';
               ctx.textBaseline = 'middle';
-              // Center vertically for better alignment in the box
+              // Draw text. Since we auto-adjust width in App.tsx, we can just draw at 0, y-center.
               ctx.fillText(sig.content, 0, sig.height / 2);
           }
         }
